@@ -17,6 +17,7 @@ modules += {
         'src/proc.c',
         'src/signal.c',
         'src/socket.c',
+        'src/time.c',
         'src/tty.c',
       ], c_args: '-D_POSIX_C_SOURCE=200809L',
       dependencies: posix_deps,
