@@ -60,6 +60,14 @@ static void print_loop(worker_params_t *worker_params) {
             "could not perform the initial synchronization at the barrier"));
     }
 
+    // the program state after the barrier:
+    // - the 0th thread holds mtxes[0] (this id is stored in its mtx_id) and mtxes[1]
+    // - any other thread i holds mtxes[(i + 1)]
+    //
+    // the 0th thread goes straight to printing things
+    // all the other get blocked on trying to lock mtxes[((i + 2) % (n + 1))],
+    // owned by the ((i + 1) % (n + 1))th thread
+
     size_t i = 0;
     bool initialized = id != 0;
 

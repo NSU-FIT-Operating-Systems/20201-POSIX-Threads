@@ -51,7 +51,7 @@ static err_t take_fork(size_t id, pthread_mutex_t *mtx, size_t fork_id, char con
 
     if (!ERR_FAILED(err)) {
         log_printf(LOG_INFO, "The philosopher #%zu has taken the %s fork (#%zu)",
-            id + 1, hand, fork_id + 1);
+            id, hand, fork_id + 1);
     }
 
     return err;
@@ -94,6 +94,8 @@ static void *worker_thread(void *worker_params_opaque) {
     pthread_mutex_t *left_fork = &forks[left_fork_id];
     pthread_mutex_t *right_fork = &forks[right_fork_id];
 
+    int counter = 0;
+
     while ((dish = food_store_take(food_store)) != -1) {
         if (id == 0) {
             err_t sleep_error = ERR(wrapper_nanosleep(&(struct timespec) {
@@ -113,6 +115,7 @@ static void *worker_thread(void *worker_params_opaque) {
             "could not pick up the right fork"));
 
         log_printf(LOG_INFO, "The philosopher #%zu has started eating dish %d", id + 1, dish + 1);
+        log_printf(LOG_INFO, "The philosogper #%zu has eaten %d dishes", id + 1, ++counter);
 
         err_t sleep_error = ERR(wrapper_nanosleep(&(struct timespec) {
             .tv_sec = DELAY_NS / 1'000'000'000,
