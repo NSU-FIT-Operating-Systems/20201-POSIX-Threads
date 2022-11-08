@@ -184,7 +184,30 @@ bool string_equals(string_t const *self, string_t const *other) {
     assert(self != NULL);
     assert(other != NULL);
 
-    return strcmp((char const *) string_as_ptr(self), (char const *) string_as_ptr(other)) == 0;
+    if (string_len(self) != string_len(other)) {
+        return false;
+    }
+
+    return string_cmp(self, other) == 0;
+}
+
+int string_cmp(string_t const *self, string_t const *other) {
+    assert(self != NULL);
+    assert(other != NULL);
+
+    size_t len = string_len(self);
+    size_t other_len = string_len(other);
+
+    if (other_len < len) {
+        len = other_len;
+    }
+
+    return memcmp(
+        (void const *) string_as_ptr(self),
+        (void const *) string_as_ptr(other),
+        // safe: string_as_ptr(s)[string_len(s)] == '\0'
+        len + 1
+    );
 }
 
 size_t string_len(string_t const *self) {

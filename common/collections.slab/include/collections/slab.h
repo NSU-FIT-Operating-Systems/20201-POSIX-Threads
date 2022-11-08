@@ -167,7 +167,7 @@ SLAB_STATIC common_error_code_t SLAB_NAME(append)(
             return COMMON_ERROR_CODE_OVERFLOW;
         }
 
-        GOTO_ON_ERROR(SLAB_VEC_NAME(push)(
+        GOTO_ON_ERROR(code = SLAB_VEC_NAME(push)(
             &self->storage,
             (SLAB_NODE_TYPE) {
                 .value = value,
@@ -227,7 +227,7 @@ SLAB_STATIC common_error_code_t SLAB_NAME(add_after)(
     common_error_code_t code = COMMON_ERROR_CODE_OK;
 
     size_t node_index;
-    GOTO_ON_ERROR(SLAB_NAME(append)(self, value, &node_index), append_fail);
+    GOTO_ON_ERROR(code = SLAB_NAME(append)(self, value, &node_index), append_fail);
 
     SLAB_NODE_TYPE *prev = SLAB_NAME(get_node_mut)(self, prev_index);
     SLAB_NODE_TYPE *node = SLAB_NAME(get_node_mut)(self, node_index);

@@ -21,3 +21,19 @@ posix_err_t wrapper_nanosleep(struct timespec *const time) {
 
     return make_posix_err_ok();
 }
+
+posix_err_t wrapper_clock_gettime(clockid_t clock_id, struct timespec *tp) {
+    assert(tp != NULL);
+
+    struct timespec result = {0};
+    errno = 0;
+    int retval = clock_gettime(clock_id, &result);
+
+    if (retval < 0) {
+        return make_posix_err("clock_gettime(2) failed");
+    }
+
+    memcpy(tp, &result, sizeof(struct timespec));
+
+    return make_posix_err_ok();
+}

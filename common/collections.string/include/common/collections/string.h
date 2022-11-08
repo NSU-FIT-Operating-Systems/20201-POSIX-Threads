@@ -31,5 +31,6 @@ unsigned char string_get(string_t const *self, size_t pos);
 unsigned char const *string_as_ptr(string_t const *self);
 char const *string_as_cptr(string_t const *self);
 bool string_equals(string_t const *self, string_t const *other);
+int string_cmp(string_t const *self, string_t const *other);
 size_t string_len(string_t const *self);
 size_t string_capacity(string_t const *self);
