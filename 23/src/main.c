@@ -17,7 +17,7 @@ typedef string_t *strptr_t;
 #define DLIST_CONFIG (COLLECTION_DECLARE | COLLECTION_DEFINE | COLLECTION_STATIC)
 #include <common/collections/dlist.h>
 
-static const long long sleep_per_char_us = 10'000;
+static const long long sleep_per_char_us = 50'000;
 
 typedef struct {
     bool start;
