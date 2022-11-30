@@ -73,15 +73,15 @@ int main() {
 		}
 	}
 
-	for (int i = 0; i < PRODUCERS; i++){
-		if (pthread_join(prods[i], NULL) != 0){
+	for (int i = 0; i < PRODUCERS; i++) {
+		if (pthread_join(prods[i], NULL) != 0) {
 			perror("failed to join producer thread");
 			pthread_exit(NULL);
 		}
 	}
 
-	for (int i = 0; i < CONSUMERS; i++){
-		if (pthread_join(cons[i], NULL) != 0){
+	for (int i = 0; i < CONSUMERS; i++) {
+		if (pthread_join(cons[i], NULL) != 0) {
 			perror("failed to join consumer thread");
 			pthread_exit(NULL);
 		}
