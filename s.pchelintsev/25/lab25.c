@@ -18,14 +18,6 @@ void wqInit(WorkQueue* q) {
 
 	char* chunk = (char*)malloc(WQ_QUEUE_CAP * stringSize);
 
-	/*    ___________________________________________
-		 |||         |               |               |
-		 |||         V               V               V
-	    [  ptrArray ][   string1    ][   string2    ][ ... ]
-
-	    |<-arrSize->||<-stringSize->||<-stringSize->|
-	*/
-
 	q->strungs = chunk;
 }
 

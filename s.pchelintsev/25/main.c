@@ -19,7 +19,7 @@ void generateRandomString(char* where, size_t max) {
 
 	for (int i = 0; i <= times; i++) {
 		snprintf(where + cursor, max - cursor, "String #%d%c", i, i == times ? ' ' : '|');
-		cursor = strlen(where); // i'm aware this is unoptimized... this is a dirty example
+		cursor = strlen(where); // unoptimized, w/e
 	}
 
 	where[min(cursor, max)] = 0;
