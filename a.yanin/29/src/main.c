@@ -257,7 +257,12 @@ static void stop_waiting_for_user(bool *waiting_for_user) {
     fflush(stderr);
 }
 
-static err_t stdin_data_process(stdin_data_t *self, bool *should_paginate, bool *waiting_for_user) {
+static err_t stdin_data_process(
+    stdin_data_t *self,
+    bool *should_paginate,
+    bool *waiting_for_user,
+    bool waiting_for_server
+) {
     assert(self != NULL);
     assert(should_paginate != NULL);
     assert(waiting_for_user != NULL);
@@ -286,12 +291,12 @@ static err_t stdin_data_process(stdin_data_t *self, bool *should_paginate, bool 
         return error;
     }
 
-    if (!*waiting_for_user) {
-        return error;
-    }
-
     if (memchr(self->buf, ' ', read_count) != NULL) {
-        stop_waiting_for_user(waiting_for_user);
+        if (*waiting_for_user) {
+            stop_waiting_for_user(waiting_for_user);
+        } else if (waiting_for_server) {
+            log_printf(LOG_INFO, "The server is too slow, please be patient...");
+        }
     }
 
     return ERR(stdin_data_request(self), "failed to post a read request");
@@ -363,6 +368,25 @@ static err_t print_lines(buf_t *response, size_t *line_count) {
     return error;
 }
 
+static bool has_full_page(buf_t *response) {
+    size_t line_count = 0;
+    size_t byte_count = buf_available_read_size(response);
+    char const *p = buf_get_read_ptr(response);
+    char const *end = p + byte_count;
+
+    for (; p < end && line_count < LINE_LIMIT; ++line_count) {
+        p = memchr(p, '\n', end - p - 1);
+
+        if (p == NULL) {
+            return false;
+        }
+
+        ++p;
+    }
+
+    return line_count >= LINE_LIMIT;
+}
+
 static err_t run_printer(int sock_fd, int signal_fd, bool should_paginate) {
     assert(sock_fd >= 0);
     assert(signal_fd >= 0);
@@ -371,6 +395,10 @@ static err_t run_printer(int sock_fd, int signal_fd, bool should_paginate) {
 
     size_t line_count = 0;
     bool waiting_for_user = false;
+    // true if we aren't printing anything because we're waiting for the server to send us a
+    // full page (25 lines) and not because the user is too slow
+    bool waiting_for_server = false;
+
     bool running = true;
     bool eof = false;
 
@@ -415,11 +443,22 @@ static err_t run_printer(int sock_fd, int signal_fd, bool should_paginate) {
         if (ERR_FAILED(error = ERR(signal_data_process(&signal_data, &running),
                 NULL))) goto handle_fail;
         if (ERR_FAILED(error = ERR(sock_data_process(&sock_data, &eof), NULL))) goto handle_fail;
+
+        waiting_for_server = (
+            !waiting_for_user &&
+            // don't paginate the output if we shouldn't and just print everything right away
+            should_paginate &&
+            // if the server's telling us it won't send anything anymore, there's no point in
+            // waiting
+            !eof &&
+            !has_full_page(&response)
+        );
+
         if (ERR_FAILED(error = ERR(stdin_data_process(&stdin_data, &should_paginate,
-                &waiting_for_user), NULL))) goto handle_fail;
+                &waiting_for_user, waiting_for_server), NULL))) goto handle_fail;
 
         if (should_paginate) {
-            if (!waiting_for_user) {
+            if (!waiting_for_user && !waiting_for_server) {
                 print_lines(&response, &line_count);
             }
         } else {
