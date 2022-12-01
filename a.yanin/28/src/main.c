@@ -106,7 +106,8 @@ static err_t read_input(
     int in_fd,
     struct pollfd *in_pollfd,
     bool *should_paginate,
-    bool *waiting_for_user
+    bool *waiting_for_user,
+    bool waiting_for_server
 ) {
     assert(in_fd >= 0);
     assert(in_pollfd != NULL);
@@ -131,12 +132,12 @@ static err_t read_input(
         return error;
     }
 
-    if (!*waiting_for_user) {
-        return error;
-    }
-
     if (c == ' ') {
-        stop_waiting_for_user(waiting_for_user);
+        if (*waiting_for_user) {
+            stop_waiting_for_user(waiting_for_user);
+        } else if (waiting_for_server) {
+            log_printf(LOG_INFO, "The server is too slow, please be patient...");
+        }
     }
 
     return error;
@@ -220,6 +221,25 @@ static err_t print_lines(buf_t *response, size_t *line_count, bool should_pagina
     return error;
 }
 
+static bool has_full_page(buf_t *response) {
+    size_t line_count = 0;
+    size_t byte_count = buf_available_read_size(response);
+    char const *p = buf_get_read_ptr(response);
+    char const *end = p + byte_count;
+
+    for (; p < end && line_count < LINE_LIMIT; ++line_count) {
+        p = memchr(p, '\n', end - p - 1);
+
+        if (p == NULL) {
+            return false;
+        }
+
+        ++p;
+    }
+
+    return line_count >= LINE_LIMIT;
+}
+
 static err_t run_printer(int sock_fd, int signal_fd, bool should_paginate) {
     assert(sock_fd >= 0);
     assert(signal_fd >= 0);
@@ -228,6 +248,9 @@ static err_t run_printer(int sock_fd, int signal_fd, bool should_paginate) {
 
     size_t line_count = 0;
     bool waiting_for_user = false;
+    // true if we aren't printing anything because we're waiting for the server to send us a
+    // full page (25 lines) and not because the user is too slow
+    bool waiting_for_server = false;
 
     struct pollfd fds[] = {
         { .fd = sock_fd, .events = POLLIN },
@@ -266,20 +289,30 @@ static err_t run_printer(int sock_fd, int signal_fd, bool should_paginate) {
             continue;
         }
 
-        if (stdin_pollfd->revents != 0) {
-            error = ERR(read_input(STDIN_FILENO, stdin_pollfd, &should_paginate,
-                &waiting_for_user), NULL);
-
-            if (ERR_FAILED(error)) goto handle_fail;
-        }
-
         if (sock_pollfd->revents != 0) {
             error = ERR(read_response(sock_fd, sock_pollfd, &response, &eof), NULL);
 
             if (ERR_FAILED(error)) goto handle_fail;
         }
 
-        if (!waiting_for_user) {
+        waiting_for_server = (
+            !waiting_for_user &&
+            // don't paginate the output if we shouldn't and just print everything right away
+            should_paginate &&
+            // if the server's telling us it won't send anything anymore, there's no point in
+            // waiting
+            !eof &&
+            !has_full_page(&response)
+        );
+
+        if (stdin_pollfd->revents != 0) {
+            error = ERR(read_input(STDIN_FILENO, stdin_pollfd, &should_paginate,
+                &waiting_for_user, waiting_for_server), NULL);
+
+            if (ERR_FAILED(error)) goto handle_fail;
+        }
+
+        if (!waiting_for_user && !waiting_for_server) {
             print_lines(&response, &line_count, should_paginate);
 
             if (eof && buf_available_read_size(&response) == 0) {
@@ -348,11 +381,15 @@ int main(int argc, char *argv[]) {
     if (ERR_FAILED(error = ERR(http_get(url, &sock_fd),
             "failed to make an HTTP request"))) goto request_fail;
 
+    if (ERR_FAILED(error = ERR(wrapper_fcntli(sock_fd, F_SETFL, (int) O_NONBLOCK),
+            "failed to mark the socket as non-blocking"))) goto fcntl_fail;
+
     if (ERR_FAILED(error = ERR(run_printer(sock_fd, signal_fd, should_paginate), NULL))) {
         goto run_fail;
     }
 
 run_fail:
+fcntl_fail:
     if (ERR_FAILED(close_error = ERR(wrapper_close(sock_fd), "failed to close the socket"))) {
         err_log_free(LOG_WARN, &close_error);
     }
