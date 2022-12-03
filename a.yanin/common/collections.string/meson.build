@@ -1,4 +1,4 @@
-collections_string_deps = [modules['error'], modules['collections.vec']]
+collections_string_deps = [modules['error-codes'], modules['collections.vec']]
 
 modules += {
   'collections.string': declare_dependency(

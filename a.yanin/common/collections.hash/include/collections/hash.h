@@ -43,7 +43,7 @@
 
 #include <stddef.h>
 
-#include "common/error/error-codes.h"
+#include "common/error-codes/error-codes.h"
 
 typedef enum {
     HASH_NAME(STATE_FREE),

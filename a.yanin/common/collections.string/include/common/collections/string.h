@@ -2,7 +2,7 @@
 
 #include <stdbool.h>
 
-#include "common/error/error-codes.h"
+#include "common/error-codes/error-codes.h"
 
 #define VEC_ELEMENT_TYPE unsigned char
 #define VEC_LABEL uchar

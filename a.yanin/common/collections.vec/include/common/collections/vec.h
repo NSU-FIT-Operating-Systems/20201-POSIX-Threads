@@ -35,7 +35,7 @@
 
 #include <stddef.h>
 
-#include "common/error/error-codes.h"
+#include "common/error-codes/error-codes.h"
 
 typedef struct {
     VEC_ELEMENT_TYPE *storage;
@@ -71,7 +71,7 @@ VEC_STATIC void VEC_NAME(for_each)(VEC_TYPE *self, VEC_NAME(each_callback_t) cal
 #include <stdlib.h>
 #include <string.h>
 
-#include "common/error/macros.h"
+#include "common/error-codes/macros.h"
 
 VEC_STATIC VEC_TYPE VEC_NAME(new)(void) {
     VEC_TYPE result = {

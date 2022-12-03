@@ -1,4 +1,4 @@
-#include "common/error/display.h"
+#include "common/error-codes/display.h"
 
 #include <assert.h>
 #include <stdlib.h>

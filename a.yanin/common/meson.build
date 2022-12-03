@@ -4,8 +4,8 @@ project('common', 'c',
 modules = {}
 
 subdir('log')
-subdir('error')
-subdir('error.display')
+subdir('error-codes')
+subdir('error-codes.display')
 subdir('util.concat-token')
 subdir('collections')
 subdir('collections.dlist')

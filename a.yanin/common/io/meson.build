@@ -1,4 +1,4 @@
-io_deps = [modules['error'], modules['collections.string']]
+io_deps = [modules['error-codes'], modules['collections.string']]
 
 modules += {
   'io': declare_dependency(

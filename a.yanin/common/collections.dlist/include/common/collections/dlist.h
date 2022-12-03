@@ -35,7 +35,7 @@
 
 #include <stddef.h>
 
-#include "common/error/error-codes.h"
+#include "common/error-codes/error-codes.h"
 
 typedef struct DLIST_NAME(node) DLIST_NODE_TYPE;
 
@@ -113,7 +113,7 @@ DLIST_STATIC void DLIST_NAME(swap)(DLIST_TYPE *self, DLIST_NODE_TYPE *lhs, DLIST
 #include <assert.h>
 #include <stdlib.h>
 
-#include "common/error/macros.h"
+#include "common/error-codes/macros.h"
 
 DLIST_STATIC DLIST_TYPE DLIST_NAME(new)(void) {
     return (DLIST_TYPE) {

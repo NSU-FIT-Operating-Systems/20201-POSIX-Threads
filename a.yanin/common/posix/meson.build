@@ -1,5 +1,5 @@
 posix_deps = [
-  modules['error'],
+  modules['error-codes'],
   meson.get_compiler('c').find_library('rt', required: false),
 ]
 
