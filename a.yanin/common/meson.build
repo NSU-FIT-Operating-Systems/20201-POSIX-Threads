@@ -1,5 +1,5 @@
 project('common', 'c',
-  default_options: ['warning_level=3', 'cpp_std=c17', 'werror=true', 'default_library=static'])
+  default_options: ['warning_level=3', 'c_std=c2x', 'werror=true', 'default_library=static'])
 
 modules = {}
 
@@ -13,5 +13,6 @@ subdir('collections.hash')
 subdir('collections.vec')
 subdir('collections.slab')
 subdir('collections.string')
+subdir('error')
 subdir('io')
 subdir('posix')

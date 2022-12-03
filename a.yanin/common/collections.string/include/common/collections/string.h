@@ -19,11 +19,14 @@ common_error_code_t string_from_slice(char const *begin, size_t count, string_t 
 void string_from_raw(char *buf, size_t capacity, string_t *result);
 
 [[gnu::format(printf, 2, 3)]]
-common_error_code_t string_sprintf(string_t *result, const char *format, ...);
+common_error_code_t string_sprintf(string_t *result, char const *format, ...);
+[[gnu::format(printf, 2, 3)]]
+common_error_code_t string_appendf(string_t *self, char const *format, ...);
 
 void string_free(string_t *self);
 common_error_code_t string_insert(string_t *self, size_t pos, unsigned char ch);
 common_error_code_t string_push(string_t *self, unsigned char ch);
+common_error_code_t string_append(string_t *self, string_t const *other);
 void string_remove(string_t *self, size_t pos);
 void string_pop(string_t *self);
 void string_clear(string_t *self);

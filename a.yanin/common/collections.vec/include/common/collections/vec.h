@@ -52,6 +52,7 @@ VEC_STATIC void VEC_NAME(free)(VEC_TYPE *self);
 VEC_STATIC common_error_code_t VEC_NAME(resize)(VEC_TYPE *self, size_t new_capacity);
 VEC_STATIC common_error_code_t VEC_NAME(insert)(VEC_TYPE *self, size_t pos, VEC_ELEMENT_TYPE value);
 VEC_STATIC common_error_code_t VEC_NAME(push)(VEC_TYPE *self, VEC_ELEMENT_TYPE value);
+VEC_STATIC common_error_code_t VEC_NAME(append)(VEC_TYPE *self, VEC_TYPE const *other);
 VEC_STATIC void VEC_NAME(remove)(VEC_TYPE *self, size_t pos);
 VEC_STATIC void VEC_NAME(set_len)(VEC_TYPE *self, size_t new_len);
 VEC_STATIC void VEC_NAME(clear)(VEC_TYPE *self);
@@ -189,6 +190,30 @@ enlarge_fail:
 
 VEC_STATIC common_error_code_t VEC_NAME(push)(VEC_TYPE *self, VEC_ELEMENT_TYPE value) {
     return VEC_NAME(insert)(self, self->len, value);
+}
+
+VEC_STATIC common_error_code_t VEC_NAME(append)(VEC_TYPE *self, VEC_TYPE const *other) {
+    assert(self != NULL);
+    assert(other != NULL);
+
+    common_error_code_t code = COMMON_ERROR_CODE_OK;
+
+    size_t start = self->len;
+    size_t new_len = start + other->len;
+
+    if (self->capacity <= new_len) {
+        GOTO_ON_ERROR(code = VEC_NAME(resize)(self, new_len), fail);
+    }
+
+    memmove(
+        self->storage + start,
+        other->storage,
+        other->len
+    );
+    self->len = new_len;
+
+fail:
+    return code;
 }
 
 VEC_STATIC void VEC_NAME(remove)(VEC_TYPE *self, size_t pos) {

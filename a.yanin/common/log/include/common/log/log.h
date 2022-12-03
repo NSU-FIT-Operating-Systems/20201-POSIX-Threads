@@ -45,6 +45,7 @@ static inline bool log_level_filtered(log_level_t level) {
 }
 
 [[gnu::format(printf, 2, 3)]]
+[[maybe_unused]]
 static inline void log_printf(log_level_t level, char const *fmt, ...) {
     if (log_level_filtered(level)) return;
 
@@ -57,6 +58,7 @@ static inline void log_printf(log_level_t level, char const *fmt, ...) {
     log_unlock();
 }
 
+[[maybe_unused]]
 static inline void log_write(log_level_t level, char const *str) {
     if (log_level_filtered(level)) return;
 
@@ -65,6 +67,7 @@ static inline void log_write(log_level_t level, char const *str) {
     log_unlock();
 }
 
+[[maybe_unused]]
 static inline void log_vwritef(log_level_t level, char const *fmt, va_list args) {
     if (log_level_filtered(level)) return;
 
