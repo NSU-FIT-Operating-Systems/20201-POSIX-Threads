@@ -2,32 +2,11 @@
 
 #include <stdarg.h>
 #include <stdbool.h>
+#include <threads.h>
 
-#define LOG_MODE_UNSYNC 0
-#define LOG_MODE_SYNC 1
+#include <pthread.h>
 
-#if LOG_MODE == LOG_MODE_UNSYNC
-
-static inline void log_lock(void) {}
-static inline void log_unlock(void) {}
-
-#else
-
-static pthread_mutex_t log_mtx = PTHREAD_MUTEX_INITIALIZER;
-
-static inline void log_lock(void) {
-    pthread_mutex_lock(&log_mtx);
-}
-
-static inline void log_unlock(void) {
-    pthread_mutex_unlock(&log_mtx);
-}
-
-#endif
-
-#ifndef LOG_LEVEL
-#define LOG_LEVEL LOG_DEBUG
-#endif
+extern pthread_mutex_t log_mtx;
 
 typedef enum {
     LOG_DEBUG,
@@ -36,12 +15,29 @@ typedef enum {
     LOG_ERR,
 } log_level_t;
 
+typedef void (*log_hook_t)(log_level_t level);
+
+// The log hook is called each time a log function is called.
+// By default, it prints the level prefix.
+extern thread_local log_hook_t log_hook;
+
+extern char const *const log_prefix_debug;
+extern char const *const log_prefix_info;
+extern char const *const log_prefix_warn;
+extern char const *const log_prefix_err;
+
+bool log_is_sync(void);
+void log_set_sync(void);
+
+log_level_t log_get_level(void);
+void log_set_level(log_level_t log_level);
+
 void log_vprintf_impl(log_level_t level, char const *fmt, va_list args);
 void log_write_impl(log_level_t level, char const *str);
 void log_vwritef_impl(log_level_t level, char const *fmt, va_list args);
 
 static inline bool log_level_filtered(log_level_t level) {
-    return level < LOG_LEVEL;
+    return level < log_get_level();
 }
 
 [[gnu::format(printf, 2, 3)]]
@@ -49,29 +45,51 @@ static inline bool log_level_filtered(log_level_t level) {
 static inline void log_printf(log_level_t level, char const *fmt, ...) {
     if (log_level_filtered(level)) return;
 
-    log_lock();
+    bool sync = log_is_sync();
+
+    if (sync) {
+        pthread_mutex_lock(&log_mtx);
+    }
 
     va_list args;
     va_start(args, fmt);
     log_vprintf_impl(level, fmt, args);
 
-    log_unlock();
+    if (sync) {
+        pthread_mutex_unlock(&log_mtx);
+    }
 }
 
 [[maybe_unused]]
 static inline void log_write(log_level_t level, char const *str) {
     if (log_level_filtered(level)) return;
 
-    log_lock();
+    bool sync = log_is_sync();
+
+    if (sync) {
+        pthread_mutex_lock(&log_mtx);
+    }
+
     log_write_impl(level, str);
-    log_unlock();
+
+    if (sync) {
+        pthread_mutex_unlock(&log_mtx);
+    }
 }
 
 [[maybe_unused]]
 static inline void log_vwritef(log_level_t level, char const *fmt, va_list args) {
     if (log_level_filtered(level)) return;
 
-    log_lock();
+    bool sync = log_is_sync();
+
+    if (sync) {
+        pthread_mutex_lock(&log_mtx);
+    }
+
     log_vwritef_impl(level, fmt, args);
-    log_unlock();
+
+    if (sync) {
+        pthread_mutex_unlock(&log_mtx);
+    }
 }

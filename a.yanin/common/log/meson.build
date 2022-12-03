@@ -1,4 +1,6 @@
-collections_log_deps = []
+collections_log_deps = [
+  dependency('threads'),
+]
 
 modules += {
   'log': declare_dependency(
