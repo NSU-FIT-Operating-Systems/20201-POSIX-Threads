@@ -15,18 +15,22 @@ typedef struct wqueue_t {
 	// the task doesn't allow using mutexes, but i kinda need one...
 	sem_t mutex; // binary semaphore used as a mutex
 
+	int head; // write cursor
 	int tail; // read cursor
+
+	int valid; // whether this queue is still valid; if it's dropped via wqInvalidate, it can't be used anymore
+	int waiting; // amount of threads blocked on the semaphores; necessary for wqInvalidate
 } WorkQueue;
 
 void 	wqInit	(WorkQueue*);
-void 	wqClear	(WorkQueue*);
+void 	wqInvalidate	(WorkQueue*);
 void 	wqFree	(WorkQueue*);
 int 	wqPut	(WorkQueue*, char* msg);
 int 	wqPop	(WorkQueue*, char* buf, size_t bufsize);
 
 #ifdef PROPER_NAMES // power play
 #define mymsginit(q) 		wqInit(q)
-#define mymsqdrop(q) 		wqClear(q)
+#define mymsqdrop(q) 		wqInvalidate(q)
 #define mymsgdestroy(q)		wqFree(q)
 #define mymsgput(q, a) 		wqPut(q, a)
 #define mymsgget(q, a, b) 	wqPop(q, a, b)
