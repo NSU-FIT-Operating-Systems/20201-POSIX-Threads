@@ -8,11 +8,12 @@
 
 #include "lab25.h"
 
+/* Ctor/dtor */
 void wqInit(WorkQueue* q) {
-	assert(sem_init(&q->sem, 0, 0) == 0);
+	assert(sem_init(&q->semFull, 0, 0) == 0);
+	assert(sem_init(&q->semFree, 0, WQ_QUEUE_CAP) == 0);
+	assert(sem_init(&q->mutex, 0, 1) == 0);
 	q->tail = 0;
-
-	pthread_mutex_init(&q->mut, NULL);
 
 	size_t stringSize = sizeof(char) * WQ_STRING_CAP;
 
@@ -23,57 +24,99 @@ void wqInit(WorkQueue* q) {
 
 void wqFree(WorkQueue* q) {
 	free(q->strungs);
-	sem_destroy(&q->sem);
-	pthread_mutex_destroy(&q->mut);
+	sem_destroy(&q->semFull);
+	sem_destroy(&q->semFree);
+	sem_destroy(&q->mutex);
 }
 
-char* wqGetString(WorkQueue* q, size_t i) {
-	return q->strungs + sizeof(char) * WQ_STRING_CAP * i;
+
+
+/* Internal */
+
+void _wqLock(WorkQueue* q) {
+	sem_wait(&q->mutex);
 }
 
-/* Head = Write Cursor */
-size_t wqGetHead(WorkQueue* wq) {
-	int head;
-	sem_getvalue(&wq->sem, &head);
-	if (head < 0) head = 0;
-
-	return (wq->tail + head) % WQ_QUEUE_CAP;
+void _wqUnlock(WorkQueue* q) {
+	sem_post(&q->mutex);
 }
 
-/* Tail = Read Cursor */
-size_t wqGetTail(WorkQueue* wq) {
-	return wq->tail;
+// eucledian modulo
+// (not the same as the modulo operator with negative numbers)
+int _wqWrap(int n, int add) {
+	int mod = WQ_QUEUE_CAP;
+	int x = (n + add) % mod;
+
+	return x < 0 ? x + mod : x;
 }
 
-void wqAdvanceTail(WorkQueue* wq) {
-	wq->tail = (wq->tail + 1) % WQ_QUEUE_CAP;
-}
-
-int wqPop(WorkQueue* wq, char* buf, size_t bufsize) {
+// Decrement one semaphore, then lock the mutex, then increment the other
+// Useful in push/pop operations
+void _wqSemDecrLockIncr(WorkQueue* q, sem_t* decr, sem_t* incr) {
 	int ret = 0;
-	while ((ret = sem_wait(&wq->sem)) != 0) {
+
+	while ((ret = sem_wait(decr)) != 0) {
 		if (errno == EINTR) { continue; } // EINTR = interrupted by signal... we need to wait again
 		perror("Error while decrementing semaphore: ");
 		exit(0); // EINVAL is critical; it's best not to proceed
 		break;
 	}
 
+	_wqLock(q);
+	sem_post(incr);
+}
+
+char* _wqGetString(WorkQueue* q, size_t i) {
+	return q->strungs + sizeof(char) * WQ_STRING_CAP * i;
+}
+
+
+
+/* Head (= write cursor) */
+
+size_t wqGetHead(WorkQueue* q) {
+	int head;
+	sem_getvalue(&q->semFull, &head);
+	if (head < 0) head = 0;
+
+	return _wqWrap(q->tail, head);
+}
+
+
+
+/* Tail (= read cursor) */
+size_t wqGetTail(WorkQueue* q) {
+	return q->tail;
+}
+
+void wqAdvanceTail(WorkQueue* q) {
+	q->tail = _wqWrap(q->tail, 1);
+}
+
+
+
+/* Push/pop operations */
+int wqPop(WorkQueue* q, char* buf, size_t bufsize) {
+	_wqSemDecrLockIncr(q, &q->semFull, &q->semFree);
+
 	// don't copy more than they can handle
 	size_t cpySize = bufsize < WQ_STRING_CAP ? bufsize : WQ_STRING_CAP;
-	memcpy(buf, wqGetString(wq, wqGetTail(wq)), cpySize);
+	memcpy(buf, _wqGetString(q, wqGetTail(q)), cpySize);
 
-	pthread_mutex_lock(&wq->mut);
-	wqAdvanceTail(wq);
-	pthread_mutex_unlock(&wq->mut);
+	wqAdvanceTail(q);
+
+	_wqUnlock(q);
 
 	return cpySize;
 }
 
-int wqPut(WorkQueue* wq, char* buf) {
-	pthread_mutex_lock(&wq->mut);
+int wqPut(WorkQueue* q, char* buf) {
+	_wqSemDecrLockIncr(q, &q->semFree, &q->semFull);
 
-	char* str = wqGetString(wq, wqGetHead(wq));
-	assert(sem_post(&wq->sem) == 0);
+	// Because we just advanced the head semaphore, we need to subtract 1
+	// to get to the index we just claimed as "taken"
+	int write = _wqWrap(wqGetHead(q), -1);
+	char* str = _wqGetString(q, write);
 
 	int len = WQ_STRING_CAP;
 
@@ -86,7 +129,7 @@ int wqPut(WorkQueue* wq, char* buf) {
 		}
 	}
 
-	pthread_mutex_unlock(&wq->mut);
+	_wqUnlock(q);
 
 	return len;
 }

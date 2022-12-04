@@ -3,11 +3,12 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "lab25.h"
 
-#define PRODUCERS 4
-#define CONSUMERS 4
+#define PRODUCERS 2
+#define CONSUMERS 2
 #define EXAMPLE_STRING_CAP 100
 
 #define min(a, b) ( ((a) < (b)) ? (a) : (b) )
@@ -18,7 +19,7 @@ void generateRandomString(char* where, size_t max) {
 	int cursor = 0;
 
 	for (int i = 0; i <= times; i++) {
-		snprintf(where + cursor, max - cursor, "String #%d%c", i, i == times ? ' ' : '|');
+		snprintf(where + cursor, max - cursor, "#%d%c", i, i == times ? ' ' : '|');
 		cursor = strlen(where); // unoptimized, w/e
 	}
 
@@ -26,12 +27,18 @@ void generateRandomString(char* where, size_t max) {
 }
 
 void* producer(void* wqVoid) {
+	printf("Producer starting; sleeping...\n");
+	sleep(1);
+	printf("Unslept; pushing strings.\n");
+
 	WorkQueue* wq = (WorkQueue*)wqVoid;
 
 	while (1) {
+	// for (int i = 0; i < 40; i++) {
 		char str[EXAMPLE_STRING_CAP] = "BAD!";
 		generateRandomString(str, EXAMPLE_STRING_CAP);
 
+		printf("<< %s\n", str);
 		wqPut(wq, str);
 	}
 
@@ -41,10 +48,19 @@ void* producer(void* wqVoid) {
 void* consoomer(void* wqVoid) {
 	WorkQueue* wq = (WorkQueue*)wqVoid;
 
+	printf("Consumer started; should block...\n");
+
+	int first = 0;
+
 	while (1) {
+	// for (int i = 0; i < 40; i++) {
 		char str[EXAMPLE_STRING_CAP];
 		wqPop(wq, str, EXAMPLE_STRING_CAP);
-		printf("Consumer popped off queue: %s\n", str);
+		if (first == 0) {
+			printf("Consumer unblocked!\n");
+		}
+		printf("\t>> %s\n", str);
+		first++;
 	}
 
 	return NULL;

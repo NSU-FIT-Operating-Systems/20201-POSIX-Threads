@@ -9,10 +9,13 @@
 typedef struct wqueue_t {
 	char* strungs;
 
-	sem_t sem;
-	int tail;
+	sem_t semFull; // how many elements in the queue? init = 0
+	sem_t semFree; // how many more elements we can fit? init = WQ_QUEUE_CAP
 
-	pthread_mutex_t mut;
+	// the task doesn't allow using mutexes, but i kinda need one...
+	sem_t mutex; // binary semaphore used as a mutex
+
+	int tail; // read cursor
 } WorkQueue;
 
 void 	wqInit	(WorkQueue*);
@@ -25,6 +28,6 @@ int 	wqPop	(WorkQueue*, char* buf, size_t bufsize);
 #define mymsginit(q) 		wqInit(q)
 #define mymsqdrop(q) 		wqClear(q)
 #define mymsgdestroy(q)		wqFree(q)
-#define mymsgput(q) 		wqPut(q)
-#define mymsgget(q) 		wqPop(q)
+#define mymsgput(q, a) 		wqPut(q, a)
+#define mymsgget(q, a, b) 	wqPop(q, a, b)
 #endif
