@@ -57,9 +57,9 @@ static void _wqUnlock(WorkQueue* q) {
 
 // eucledian modulo
 // (not the same as the modulo operator with negative numbers)
-static int _wqWrap(int n, int add) {
-	int mod = WQ_QUEUE_CAP;
-	int x = (n + add) % mod;
+static size_t _wqWrap(long long n, long long add) {
+	size_t mod = WQ_QUEUE_CAP;
+	long long x = (n + add) % mod;
 
 	return x < 0 ? x + mod : x;
 }
@@ -77,11 +77,11 @@ static bool _wqSemDecrLockIncr(WorkQueue* q, sem_t* decr, sem_t* incr) {
 	*/
 
 	_wqLock(q);
-		if (!q->valid) {
-			_wqUnlock(q);
-			return false;
-		}
-		q->waiting++;
+	if (!q->valid) {
+		_wqUnlock(q);
+		return false;
+	}
+	q->waiting++;
 	_wqUnlock(q);
 
 	int ret = 0;
@@ -139,7 +139,7 @@ int wqPop(WorkQueue* q, char* buf, size_t bufsize) {
 	}
 
 	// don't copy more than they can handle
-	int tail = wqGetTail(q);
+	size_t tail = wqGetTail(q);
 	size_t cpySize = bufsize < WQ_STRING_CAP ? bufsize : WQ_STRING_CAP;
 	memcpy(buf, _wqGetString(q, tail), cpySize);
 
@@ -157,14 +157,14 @@ int wqPut(WorkQueue* q, char* buf) {
 
 	// Because we just advanced the head semaphore, we need to subtract 1
 	// to get to the index we just claimed as "taken"
-	int write = wqGetHead(q);
+	size_t write = wqGetHead(q);
 	// debugprint("Write %s at %d\n", buf, write);
 	char* str = _wqGetString(q, write);
 	wqAdvanceHead(q);
 
-	int len = WQ_STRING_CAP;
+	size_t len = WQ_STRING_CAP;
 
-	for (int i = 0; i < WQ_STRING_CAP; i++) {
+	for (size_t i = 0; i < WQ_STRING_CAP; i++) {
 		str[i] = buf[i];
 
 		if (buf[i] == 0) {

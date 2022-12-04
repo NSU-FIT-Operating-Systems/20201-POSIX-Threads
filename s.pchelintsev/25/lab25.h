@@ -1,6 +1,8 @@
 // i hate the concept of headers... it's 2022 for gods sake
 #pragma once
 
+#include <stdbool.h>
+#include <stddef.h>
 #include <semaphore.h>
 
 #define WQ_QUEUE_CAP 10
@@ -15,10 +17,10 @@ typedef struct wqueue_t {
 	// the task doesn't allow using mutexes, but i kinda need one...
 	sem_t mutex; // binary semaphore used as a mutex
 
-	int head; // write cursor
-	int tail; // read cursor
+	size_t head; // write cursor
+	size_t tail; // read cursor
 
-	int valid; // whether this queue is still valid; if it's dropped via wqInvalidate, it can't be used anymore
+	bool valid; // whether this queue is still valid; if it's dropped via wqInvalidate, it can't be used anymore
 	int waiting; // amount of threads blocked on the semaphores; necessary for wqInvalidate
 } WorkQueue;
 
