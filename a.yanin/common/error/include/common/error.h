@@ -76,6 +76,7 @@ error_t const *error_null(error_t const *self);
 
 error_t *error_from_cstr(char const *str, error_t *source);
 error_t *error_from_string(string_t str, error_t *source);
+error_t *error_from_errno(int code);
 error_t *error_ok_if(bool success, char const *expr);
 
 #define OK_IF(EXPR) error_ok_if((bool)(EXPR), #EXPR)
@@ -83,6 +84,11 @@ error_t *error_ok_if(bool success, char const *expr);
 // Creates a new error that has `primary` as its primary source and `secondary` as its
 // secondary source.
 error_t *error_combine(error_t *primary, error_t *secondary);
+
+// if `source` is `NULL`, returns `NULL`.
+// Otherwise creates a new error with the given error message and `source`.
+error_t *error_wrap(char const *str, error_t *source);
+error_t *error_wrap_string(string_t str, error_t *source);
 
 // If `*self != NULL`, frees `*self` and its associated resources and sets `*self` to `NULL`.
 // Otherwise does nothing.

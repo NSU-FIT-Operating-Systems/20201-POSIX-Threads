@@ -2,6 +2,7 @@
 
 #include <assert.h>
 #include <stdlib.h>
+#include <string.h>
 
 static void sentinel_error_description(error_t const *, string_t *buf) {
     string_appendf(buf, "<could not allocate memory for the error>");
@@ -100,6 +101,7 @@ error_t *error_from_string(string_t str, error_t *source) {
 
     if (result == NULL) {
         error_free(&source);
+        string_free(&str);
 
         return &sentinel_error;
     }
@@ -113,6 +115,36 @@ error_t *error_from_string(string_t str, error_t *source) {
 
 typedef struct {
     error_t error;
+    int code;
+} error_from_errno_t;
+
+static void error_from_errno_description(error_from_errno_t const *self, string_t *buf) {
+    string_appendf(buf, "%s", strerror(self->code));
+}
+
+static void error_from_errno_free(error_from_errno_t *) {}
+
+static error_vtable_t const error_from_errno_vtable = {
+    .source = error_null,
+    .secondary = error_null,
+    .description = (error_vtable_description_t) error_from_errno_description,
+    .free = (error_vtable_free_t) error_from_errno_free,
+};
+
+error_t *error_from_errno(int code) {
+    if (code == 0) return NULL;
+
+    error_from_errno_t *result = malloc(sizeof(error_from_errno_t));
+    if (result == NULL) return &sentinel_error;
+
+    error_init(&result->error, &error_from_errno_vtable);
+    result->code = code;
+
+    return (error_t *) result;
+}
+
+typedef struct {
+    error_t error;
     char const *expr;
 } error_ok_if_t;
 
@@ -120,7 +152,7 @@ static void error_ok_if_description(error_ok_if_t const *self, string_t *buf) {
     string_appendf(buf, "assertion failed: `%s` evaluated to false", self->expr);
 }
 
-static void error_ok_if_free(error_ok_if_t const *) {}
+static void error_ok_if_free(error_ok_if_t *) {}
 
 static error_vtable_t const error_ok_if_vtable = {
     .source = error_null,
@@ -191,6 +223,22 @@ error_t *error_combine(error_t *primary, error_t *secondary) {
     result->secondary = secondary;
 
     return (error_t *) result;
+}
+
+error_t *error_wrap(char const *str, error_t *source) {
+    if (source == NULL) return NULL;
+
+    return error_from_cstr(str, source);
+}
+
+error_t *error_wrap_string(string_t str, error_t *source) {
+    if (source == NULL) {
+        string_free(&str);
+
+        return NULL;
+    }
+
+    return error_from_string(str, source);
 }
 
 void error_free(error_t **self) {
