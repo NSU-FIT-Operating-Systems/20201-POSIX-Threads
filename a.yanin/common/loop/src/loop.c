@@ -4,8 +4,14 @@
 
 #include "util.h"
 
+#define ARC_LABEL handler
+#define ARC_ELEMENT_TYPE handler_t
+#define ARC_CONFIG (COLLECTION_DEFINE)
+#define ARC_FREE_CB handler_free
+#include <common/memory/arc.h>
+
 #define VEC_LABEL handler
-#define VEC_ELEMENT_TYPE handlerp_t
+#define VEC_ELEMENT_TYPE arc_handler_ptr_t
 #define VEC_CONFIG (COLLECTION_DEFINE)
 #include <common/collections/vec.h>
 
@@ -51,10 +57,16 @@ void loop_init(loop_t *self, executor_t *executor) {
 error_t *loop_register(loop_t *self, handler_t *handler) {
     assert_mutex_lock(&self->pending_mtx);
 
-    error_t *err = error_wrap(
+    error_t *err = NULL;
+
+    arc_handler_t *arc = arc_handler_new(handler);
+    err = OK_IF(arc != NULL);
+    if (err) goto fail;
+
+    err = error_wrap(
         "Could not insert the handle in the pending queue",
         error_from_common(
-            vec_handler_push(&self->pending_handlers, handler)));
+            vec_handler_push(&self->pending_handlers, arc)));
     if (err) goto fail;
 
 fail:

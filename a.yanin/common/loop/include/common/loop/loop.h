@@ -10,14 +10,18 @@
 
 #include "common/loop/executor.h"
 
-// TODO:
-// - store arc_handler_t
-// - keep a reference in the tasks
 typedef struct handler handler_t;
-typedef handler_t *handlerp_t;
+
+#define ARC_LABEL handler
+#define ARC_ELEMENT_TYPE handler_t
+#define ARC_CONFIG (COLLECTION_DECLARE)
+#define ARC_FREE_CB handler_free
+#include <common/memory/arc.h>
+
+typedef arc_handler_t *arc_handler_ptr_t;
 
 #define VEC_LABEL handler
-#define VEC_ELEMENT_TYPE handlerp_t
+#define VEC_ELEMENT_TYPE arc_handler_ptr_t
 #define VEC_CONFIG (COLLECTION_DECLARE)
 #include <common/collections/vec.h>
 

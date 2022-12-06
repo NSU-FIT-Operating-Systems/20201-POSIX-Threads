@@ -18,7 +18,10 @@ subdir('util.concat-token')
 # The base definitions for the collections.
 subdir('collections')
 
-# A double-linked list implementation..
+# Atomic reference-counted pointers.
+subdir('memory.arc')
+
+# A double-linked list implementation.
 subdir('collections.dlist')
 
 # A typed hashmap with double hashing collision resolution.

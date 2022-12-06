@@ -3,9 +3,10 @@ loop_deps = [
   modules['collections.string'],
   modules['collections.vec'],
   modules['error'],
-  modules['log'],
-  modules['posix'],
   modules['error-codes.adapter'],
+  modules['log'],
+  modules['memory.arc'],
+  modules['posix'],
   modules['posix.adapter'],
 ]
 
