@@ -9,7 +9,8 @@
 void handler_init(handler_t *self, handler_vtable_t const *vtable, int fd) {
     self->vtable = vtable;
     self->fd = fd;
-    self->active = LOOP_HANDLER_READY;
+    self->status = LOOP_HANDLER_READY;
+    self->passive = false;
     self->current_flags = 0;
     self->pending_flags = 0;
 

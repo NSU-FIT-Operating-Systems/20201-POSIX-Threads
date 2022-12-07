@@ -58,6 +58,9 @@ ARC_STATIC ARC_TYPE *ARC_NAME(share)(ARC_TYPE *self);
 // The reference count is not modified.
 ARC_STATIC ARC_ELEMENT_TYPE *ARC_NAME(get)(ARC_TYPE *self);
 
+// Returns the reference count.
+ARC_STATIC size_t ARC_NAME(count)(ARC_TYPE const *self);
+
 #endif // #if (ARC_CONFIG) & COLLECTION_DECLARE
 
 #if (ARC_CONFIG) & COLLECTION_DEFINE
@@ -108,6 +111,10 @@ ARC_STATIC ARC_ELEMENT_TYPE *ARC_NAME(get)(ARC_TYPE *self) {
     assert(atomic_load(&self->ref_count) > 0);
 
     return self->data;
+}
+
+ARC_STATIC size_t ARC_NAME(count)(ARC_TYPE const *self) {
+    return self->ref_count;
 }
 
 #endif // #if (ARC_CONFIG) & COLLECTION_DEFINE

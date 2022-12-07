@@ -114,6 +114,12 @@ struct handler {
 // Initializes a new instance of `loop_t`.
 void loop_init(loop_t *self, executor_t *executor);
 
+// Frees the resources allocated by `self`.
+//
+// The loop must have been stopped.
+// No task must be running at the point of the call.
+void loop_free(loop_t *self);
+
 // Registers a handler in the loop.
 //
 // The ownership over the handler is transferred to the loop.

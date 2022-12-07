@@ -62,6 +62,34 @@ void loop_init(loop_t *self, executor_t *executor) {
     pthread_mutexattr_destroy(&mtx_attr);
 }
 
+void loop_free(loop_t *self) {
+    error_assert(error_wrap("The loop must have been stopped", OK_IF(self->stopped)));
+
+    pthread_mutex_destroy(&self->error_mtx);
+    pthread_mutex_destroy(&self->pending_mtx);
+
+    for (size_t i = 0; i < vec_error_len(&self->errors); ++i) {
+        error_free(vec_error_get_mut(&self->errors, i));
+    }
+
+    vec_error_free(&self->errors);
+
+    for (size_t i = 0; i < vec_handler_len(&self->pending_handlers); ++i) {
+        arc_handler_free(*vec_handler_get(&self->pending_handlers, i));
+    }
+
+    vec_handler_free(&self->pending_handlers);
+
+    for (size_t i = 0; i < vec_handler_len(&self->handlers); ++i) {
+        arc_handler_t *handler = *vec_handler_get(&self->handlers, i);
+        error_assert(error_wrap("loop_free called with a shared task",
+            OK_IF(arc_handler_count(handler) == 1)));
+        arc_handler_free(handler);
+    }
+
+    vec_handler_free(&self->handlers);
+}
+
 error_t *loop_register(loop_t *self, handler_t *handler) {
     assert_mutex_lock(&self->pending_mtx);
 
