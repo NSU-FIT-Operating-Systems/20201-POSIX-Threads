@@ -3,6 +3,7 @@
 #include <stdarg.h>
 #include <stdatomic.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include <pthread.h>
 
@@ -21,6 +22,7 @@ char const *const log_prefix_debug = CSI SGR_BOLD SGR CSI SGR_BRIGHT_BLACK SGR "
 char const *const log_prefix_info = CSI SGR_BOLD SGR CSI SGR_CYAN SGR "INFO" CSI SGR;
 char const *const log_prefix_warn = CSI SGR_BOLD SGR CSI SGR_YELLOW SGR "WARN" CSI SGR;
 char const *const log_prefix_err = CSI SGR_BOLD SGR CSI SGR_RED SGR "ERR" CSI SGR;
+char const *const log_prefix_fatal = CSI SGR_BOLD SGR CSI SGR_RED SGR "FATAL" CSI SGR;
 
 static void log_print_prefix(log_level_t level) {
     char const *prefix = NULL;
@@ -41,6 +43,9 @@ static void log_print_prefix(log_level_t level) {
     case LOG_ERR:
         prefix = log_prefix_err;
         break;
+
+    case LOG_FATAL:
+        prefix = log_prefix_fatal;
     }
 
     fprintf(stderr, "%s: ", prefix);
@@ -82,4 +87,14 @@ void log_write_impl(log_level_t level, char const *str) {
 void log_vwritef_impl(log_level_t level, char const *fmt, va_list args) {
     log_hook(level);
     vfprintf(stderr, fmt, args);
+}
+
+void log_abort(char const *fmt, ...) {
+    log_hook(LOG_FATAL);
+    va_list args;
+    va_start(args, fmt);
+    vfprintf(stderr, fmt, args);
+    fputc('\n', stderr);
+
+    abort();
 }

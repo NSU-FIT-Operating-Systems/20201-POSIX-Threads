@@ -50,6 +50,11 @@ typedef struct loop {
 typedef enum {
     LOOP_READ = POLLIN,
     LOOP_WRITE = POLLOUT,
+    LOOP_ERR = POLLERR,
+    LOOP_HUP = POLLHUP,
+
+    LOOP_ALL_IN = LOOP_READ | LOOP_WRITE,
+    LOOP_ALL = LOOP_READ | LOOP_WRITE | POLLERR | POLLHUP,
 } poll_flags_t;
 
 typedef enum {
@@ -59,7 +64,7 @@ typedef enum {
 } loop_handler_status_t;
 
 typedef void (*handler_vtable_free_t)(handler_t *self);
-typedef error_t *(*handler_vtable_process_t)(handler_t *self, poll_flags_t events);
+typedef error_t *(*handler_vtable_process_t)(handler_t *self, loop_t *loop, poll_flags_t events);
 typedef error_t *(*handler_vtable_on_error_t)(handler_t *self, error_t *error);
 
 typedef struct {
@@ -97,7 +102,8 @@ typedef struct {
 struct handler {
     handler_vtable_t const *vtable;
     int fd;
-    _Atomic(loop_handler_status_t) active;
+    _Atomic(loop_handler_status_t) status;
+    bool passive;
 
     // the following fields are protected by `mtx`
     pthread_mutex_t mtx;

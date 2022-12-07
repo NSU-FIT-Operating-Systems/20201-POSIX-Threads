@@ -13,6 +13,7 @@ typedef enum {
     LOG_INFO,
     LOG_WARN,
     LOG_ERR,
+    LOG_FATAL,
 } log_level_t;
 
 typedef void (*log_hook_t)(log_level_t level);
@@ -25,6 +26,7 @@ extern char const *const log_prefix_debug;
 extern char const *const log_prefix_info;
 extern char const *const log_prefix_warn;
 extern char const *const log_prefix_err;
+extern char const *const log_prefix_fatal;
 
 bool log_is_sync(void);
 void log_set_sync(void);
@@ -93,3 +95,6 @@ static inline void log_vwritef(log_level_t level, char const *fmt, va_list args)
         pthread_mutex_unlock(&log_mtx);
     }
 }
+
+[[gnu::format(printf, 1, 2)]]
+void log_abort(char const *fmt, ...);

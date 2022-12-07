@@ -209,6 +209,10 @@ error_t *error_combine(error_t *primary, error_t *secondary) {
         return NULL;
     }
 
+    if (secondary == NULL) {
+        return primary;
+    }
+
     error_combine_t *result = malloc(sizeof(error_combine_t));
 
     if (result == NULL) {
