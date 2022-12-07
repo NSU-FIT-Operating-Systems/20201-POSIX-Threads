@@ -16,7 +16,16 @@
 #include "dirs.h"
 
 #define BUF_SIZE 8192 // completely arbitrary
-#define STACK_SIZE 65536 // also completely arbitrary, but, by default, it's 8mb on my rpi which is insane
+#define STACK_SIZE 65536 // also completely arbitrary, but, by default, it's 8mb on my 4gb rpi which is insane
+
+// stats for funny
+typedef struct glob_t {
+	int EMFILE_counter;
+	int EAGAIN_counter;
+	int active_threads;
+} Globals;
+
+Globals globals;
 
 typedef struct work_t {
 	char* src;
@@ -45,6 +54,10 @@ static void firstInit() {
 		pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
 
 		pthread_attr_setstacksize(&attr, STACK_SIZE);
+
+		globals.EMFILE_counter = 0;
+		globals.EAGAIN_counter = 0;
+		globals.active_threads = 0;
 	}
 }
 
@@ -71,7 +84,7 @@ void* thread_cpyDir(void* wrk) {
 			if (fdRead != -1) break;
 
 			if (errno == EMFILE) {
-				printf("EMFILE... i sleep\n");
+				__atomic_fetch_add(&globals.EMFILE_counter, 1, __ATOMIC_SEQ_CST);
 				sleep(1);
 			} else {
 				printf("error while opening source file (%s): ", work->src);
@@ -98,7 +111,7 @@ void* thread_cpyDir(void* wrk) {
 			if (fdWrite != -1) break;
 
 			 if (errno == EMFILE) {
-			 	printf("EMFILE... i sleep\n");
+			 	__atomic_fetch_add(&globals.EMFILE_counter, 1, __ATOMIC_SEQ_CST);
 				sleep(1);
 			} else {
 				close(fdRead);
@@ -141,6 +154,10 @@ cleanupFiles:
 
 cleanup:
 	freeWork(wrk);
+	__atomic_fetch_sub(&globals.active_threads, 1, __ATOMIC_SEQ_CST);
+
+	// printf("EMFILE: %d, EAGAIN: %d\n", globals.EMFILE_counter, globals.EAGAIN_counter);
+
 	return NULL;
 }
 
@@ -154,12 +171,13 @@ int cpyDir(const char* from, const char* to) {
 
 	int fromLen = strlen(from);
 
-	DIR* inDir; // TODO: this should check EMFILE
+	DIR* inDir;
 	while (1) {
 		inDir = opendir(from);
 		if (inDir != NULL) break;
 
-		if (errno == EMFILE) {
+		if (errno == EMFILE || errno == ENFILE) {
+			__atomic_fetch_add(&globals.EMFILE_counter, 1, __ATOMIC_SEQ_CST);
 			sleep(1);
 		} else {
 			printf("error while opening dir (%s): ", from);
@@ -220,35 +238,46 @@ int cpyDir(const char* from, const char* to) {
 
 
 		ThreadWork* wrk = malloc(sizeof(ThreadWork));
+		if (wrk == NULL) {
+			return errno;
+		}
 
 		int ok = pthread_mutex_init(&wrk->sync, NULL);
 		if (ok != 0) {
 			perror("error while initializing mutex(!?):");
 			goto cleanup;
-			count_without_garbage = iSux - 1;
-			break;
 		}
 
 		pthread_mutex_lock(&wrk->sync);
 
 		wrk->src = NULL;
+		wrk->dest = NULL;
+		bool madeThread = false;
 
-		if (pthread_create(&wrk->thread, &attr, thread_cpyDir, wrk) != 0) {
-			perror("failed to create copy thread; aborting copy.");
-			pthread_mutex_unlock(&wrk->sync);
-			pthread_mutex_destroy(&wrk->sync);
-			free(wrk);
-			count_without_garbage = iSux;
-			goto cleanup;
-			break;
+		while (1) {
+			int ok = pthread_create(&wrk->thread, &attr, thread_cpyDir, wrk);
+			if (ok == 0) break;
+
+			if (ok == EAGAIN) {
+				// thread limit; maybe if we just sleep a bit
+				__atomic_fetch_add(&globals.EAGAIN_counter, 1, __ATOMIC_SEQ_CST);
+				printf("sleeping, EAGAIN: %d, active threads: %d\n", globals.EAGAIN_counter, globals.active_threads);
+				sleep(1);
+				continue;
+			} else {
+				perror("failed to create copy thread; aborting copy.");
+				goto cleanup_thread;
+			}
 		}
 
+		errno = 0;
+		madeThread = true;
 		size_t len = strlen(result->d_name);
+		__atomic_fetch_add(&globals.active_threads, 1, __ATOMIC_SEQ_CST);
 
 		wrk->src = malloc(len + 1 + fromLen + 2);
 		if (wrk->src == NULL) {
-			printf("capital punishment");
-			return 0;
+			goto cleanup_thread;
 		}
 
 		strcpy(wrk->src, from);
@@ -257,8 +286,7 @@ int cpyDir(const char* from, const char* to) {
 		//                       /                /\0
 		wrk->dest = malloc(len + 1 + strlen(to) + 2);
 		if (wrk->dest == NULL) {
-			printf("capital punishment");
-			return 0;
+			goto cleanup_thread;
 		}
 
 		strcpy(wrk->dest, to);
@@ -275,6 +303,18 @@ int cpyDir(const char* from, const char* to) {
 		pthread_mutex_unlock(&wrk->sync);
 
 		i++;
+
+		continue;
+
+cleanup_thread:
+		if (madeThread) {
+			pthread_cancel(wrk->thread);
+			__atomic_fetch_sub(&globals.active_threads, 1, __ATOMIC_SEQ_CST);
+		}
+		if (wrk->src != NULL) 	free(wrk->src);
+		if (wrk->dest != NULL) 	free(wrk->dest);
+		pthread_mutex_destroy(&wrk->sync);
+		free(wrk);
 	}
 
 	/* Cleanup */
