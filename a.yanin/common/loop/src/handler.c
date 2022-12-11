@@ -47,3 +47,7 @@ void handler_lock(handler_t *self) {
 void handler_unlock(handler_t *self) {
     assert_mutex_unlock(&self->mtx);
 }
+
+void handler_force(handler_t *self) {
+    self->force = true;
+}

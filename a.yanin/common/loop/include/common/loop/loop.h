@@ -65,7 +65,7 @@ typedef enum {
 
 typedef void (*handler_vtable_free_t)(handler_t *self);
 typedef error_t *(*handler_vtable_process_t)(handler_t *self, loop_t *loop, poll_flags_t events);
-typedef error_t *(*handler_vtable_on_error_t)(handler_t *self, error_t *error);
+typedef error_t *(*handler_vtable_on_error_t)(handler_t *self, loop_t *loop, error_t *error);
 
 typedef struct {
     // Frees the resources associated with the handler.
@@ -103,7 +103,10 @@ struct handler {
     handler_vtable_t const *vtable;
     int fd;
     _Atomic(loop_handler_status_t) status;
+    // passive handles don't block the loop from stopping even if they are
+    // still registered
     bool passive;
+    atomic_bool force;
 
     // the following fields are protected by `mtx`
     pthread_mutex_t mtx;
@@ -180,3 +183,10 @@ void handler_lock(handler_t *self);
 //
 // This method must be called from a synchronized context.
 void handler_unlock(handler_t *self);
+
+// Returns the fd managed by the handler.
+int handler_fd(handler_t const *self);
+
+// Forces the handler's process method to be called on the next loop iteration,
+// regardless of whether it has any I/O events pending.
+void handler_force(handler_t *self);

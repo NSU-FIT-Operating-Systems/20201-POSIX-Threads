@@ -1,6 +1,7 @@
 #include "common/loop/loop.h"
 
 #include <common/error-codes/adapter.h>
+#include <stdatomic.h>
 
 #include "common/posix/adapter.h"
 #include "util.h"
@@ -29,6 +30,7 @@
 typedef struct {
     arc_handler_t *handler;
     poll_flags_t flags;
+    bool forced;
 } pollfd_meta_t;
 
 typedef struct {
@@ -170,7 +172,8 @@ static error_t *loop_prepare_pollfd_process_handler(
     loop_t *self,
     vec_pollfd_t *pollfd,
     vec_pollfd_meta_t *meta,
-    arc_handler_t *handler_arc
+    arc_handler_t *handler_arc,
+    bool *has_forced_handlers
 ) {
     (void) self;
 
@@ -186,11 +189,17 @@ static error_t *loop_prepare_pollfd_process_handler(
     if (err) goto pollfd_fail;
 
     arc_handler_t *handler_arc_shared = arc_handler_share(handler_arc);
+    bool forced = atomic_exchange(&handler->force, false);
     err = error_from_common(vec_pollfd_meta_push(meta, (pollfd_meta_t) {
         .handler = handler_arc_shared,
+        .forced = forced,
     }));
     if (err) goto meta_fail;
     handler_arc_shared = NULL;
+
+    if (forced) {
+        *has_forced_handlers = true;
+    }
 
 meta_fail:
     arc_handler_free(handler_arc_shared);
@@ -205,7 +214,8 @@ static error_t *loop_prepare_pollfd(
     loop_t *self,
     vec_pollfd_t *pollfd,
     vec_pollfd_meta_t *meta,
-    bool *empty
+    bool *empty,
+    bool *has_forced_handlers
 ) {
     error_t *err = NULL;
 
@@ -222,7 +232,7 @@ static error_t *loop_prepare_pollfd(
             continue;
         }
 
-        err = loop_prepare_pollfd_process_handler(self, pollfd, meta, handler);
+        err = loop_prepare_pollfd_process_handler(self, pollfd, meta, handler, has_forced_handlers);
         if (err) goto fail;
 
         if (!arc_handler_get(handler)->passive) {
@@ -237,12 +247,18 @@ fail:
 static error_t *loop_poll(
     loop_t *self,
     vec_pollfd_t *pollfd,
-    vec_pollfd_meta_t *meta
+    vec_pollfd_meta_t *meta,
+    bool has_forced_handlers
 ) {
     (void) self;
 
     // use an infinite timeout for now; later, if we need timers, we'll have to adjust this
     int timeout_ms = -1;
+
+    if (has_forced_handlers) {
+        timeout_ms = 0;
+    }
+
     int poll_count = 0;
     error_t *err = error_wrap("Could not await I/O events", error_from_posix(wrapper_poll(
         vec_pollfd_as_ptr_mut(pollfd),
@@ -291,7 +307,7 @@ static error_t *loop_handler_task_cb(task_ctx_t *ctx) {
     if (err) {
         if (handler->vtable->on_error != NULL) {
             err = error_wrap("A handler's on_error method has returned an error",
-                handler->vtable->on_error(handler, err));
+                handler->vtable->on_error(handler, ctx->loop, err));
         } else {
             err = error_wrap("A handler has returned an error", err);
         }
@@ -371,7 +387,7 @@ static error_t *loop_submit_tasks(loop_t *self, vec_pollfd_meta_t *meta) {
     for (size_t i = 0; i < vec_pollfd_meta_len(meta); ++i) {
         pollfd_meta_t *meta_entry = vec_pollfd_meta_get_mut(meta, i);
 
-        if (meta_entry->flags == 0) {
+        if (meta_entry->flags == 0 && !meta_entry->forced) {
             continue;
         }
 
@@ -420,7 +436,8 @@ error_t *loop_run(loop_t *self) {
         vec_pollfd_meta_clear(&meta);
 
         bool empty = false;
-        err = loop_prepare_pollfd(self, &pollfd, &meta, &empty);
+        bool has_forced_handlers = false;
+        err = loop_prepare_pollfd(self, &pollfd, &meta, &empty, &has_forced_handlers);
         if (err) goto fail;
 
         assert(vec_pollfd_len(&pollfd) == vec_pollfd_meta_len(&meta));
@@ -430,7 +447,7 @@ error_t *loop_run(loop_t *self) {
             break;
         }
 
-        err = loop_poll(self, &pollfd, &meta);
+        err = loop_poll(self, &pollfd, &meta, has_forced_handlers);
         if (err) goto fail;
 
         err = loop_submit_tasks(self, &meta);
