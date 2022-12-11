@@ -89,7 +89,7 @@ void log_vwritef_impl(log_level_t level, char const *fmt, va_list args) {
     vfprintf(stderr, fmt, args);
 }
 
-void log_abort(char const *fmt, ...) {
+noreturn void log_abort(char const *fmt, ...) {
     log_hook(LOG_FATAL);
     va_list args;
     va_start(args, fmt);

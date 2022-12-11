@@ -44,7 +44,7 @@ typedef error_t *(*tcp_server_on_listen_error_cb_t)(
 typedef error_t *(*tcp_on_read_cb_t)(
     loop_t *loop,
     tcp_handler_t *handler,
-    slice_t *buf
+    slice_t buf
 );
 
 // Called whenever a handler has encountered a failure reading data from the socket.
@@ -92,7 +92,7 @@ error_t *tcp_accept(tcp_handler_server_t *self, tcp_handler_t **result);
 // Start listening for clients.
 //
 // Each time the socket has a pending client, the `on_new_conn` callback will be invoked.
-// If an error occurs, the `on_error` callback will be invoked.
+// If an error occurs after listening has started, the `on_error` callback will be invoked.
 error_t *tcp_server_listen(
     tcp_handler_server_t *self,
     int backlog,
@@ -124,9 +124,9 @@ bool tcp_is_eof(tcp_handler_t const *self);
 //
 // When all the data has been written, the `on_write` callback is invoked (unless `NULL`).
 //
-// If an error has been encountered while writing data (possibly from a previous request), the
-// `on_error` callback is invoked with the count of bytes already written passed to it, unless
-// `on_error` is `NULL`.
+// If an error has been encountered while writing data (possibly from a previous request),
+// the `on_error` callback is invoked with the count of bytes already written passed to it,
+// unless `on_error` is `NULL`.
 //
 // The connection must already be established.
 error_t *tcp_write(

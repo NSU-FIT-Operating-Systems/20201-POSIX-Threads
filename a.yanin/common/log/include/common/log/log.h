@@ -2,6 +2,7 @@
 
 #include <stdarg.h>
 #include <stdbool.h>
+#include <stdnoreturn.h>
 #include <threads.h>
 
 #include <pthread.h>
@@ -97,4 +98,4 @@ static inline void log_vwritef(log_level_t level, char const *fmt, va_list args)
 }
 
 [[gnu::format(printf, 1, 2)]]
-void log_abort(char const *fmt, ...);
+noreturn void log_abort(char const *fmt, ...);

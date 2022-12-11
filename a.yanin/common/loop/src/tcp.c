@@ -1,21 +1,35 @@
 #include "common/loop/tcp.h"
 
-#include <common/posix/adapter.h>
-#include <common/posix/file.h>
 #include <netinet/in.h>
+
+#include <common/error-codes/adapter.h>
+#include <common/posix/adapter.h>
+#include <common/posix/io.h>
+#include <common/posix/file.h>
+#include <common/posix/proc.h>
 
 #include "common/loop/loop.h"
 #include "util.h"
 
+enum {
+    READ_BUFFER_SIZE = 16384,
+};
+
 typedef struct {
     slice_t const *slices;
     size_t slice_count;
+    size_t written_count;
     tcp_on_write_cb_t on_write;
-    tcp_on_read_error_cb_t on_error;
+    tcp_on_write_error_cb_t on_error;
 } write_req_t;
 
 #define VEC_ELEMENT_TYPE write_req_t
 #define VEC_LABEL wrreq
+#define VEC_CONFIG (COLLECTION_DECLARE | COLLECTION_DEFINE | COLLECTION_STATIC)
+#include <common/collections/vec.h>
+
+#define VEC_ELEMENT_TYPE struct iovec
+#define VEC_LABEL iovec
 #define VEC_CONFIG (COLLECTION_DECLARE | COLLECTION_DEFINE | COLLECTION_STATIC)
 #include <common/collections/vec.h>
 
@@ -32,6 +46,7 @@ typedef enum {
 
 struct tcp_handler_server {
     handler_t handler;
+    void *custom_data;
     tcp_server_on_new_conn_cb_t on_new_conn;
     tcp_server_on_listen_error_cb_t on_listen_error;
     tcp_server_on_error_cb_t on_error;
@@ -129,7 +144,7 @@ error_t *tcp_server_new(struct sockaddr *addr, socklen_t addrlen, tcp_handler_se
 
     error_t *err = NULL;
 
-    tcp_handler_server_t *self = malloc(sizeof(tcp_handler_server_t));
+    tcp_handler_server_t *self = calloc(1, sizeof(tcp_handler_server_t));
     err = error_wrap("Could not allocate memory for the handler", OK_IF(self != NULL));
     if (err) goto malloc_fail;
 
@@ -145,6 +160,7 @@ error_t *tcp_server_new(struct sockaddr *addr, socklen_t addrlen, tcp_handler_se
     if (err) goto fcntl_fail;
 
     handler_init(&self->handler, &tcp_server_vtable, fd);
+    self->custom_data = NULL;
     self->on_new_conn = NULL;
     self->on_listen_error = NULL;
     self->on_error = NULL;
@@ -265,11 +281,207 @@ static error_t *tcp_client_handle_connecting(
 }
 
 static error_t *tcp_client_handle_read(tcp_handler_t *self, loop_t *loop) {
-    TODO("handle LOOP_READ");
+    error_t *err = NULL;
+
+    char *buf = calloc(READ_BUFFER_SIZE, 1);
+    err = error_wrap("Could not allocate a buffer for received data", OK_IF(buf != NULL));
+    if (err) goto calloc_fail;
+
+    int fd = handler_fd(&self->handler);
+    ssize_t read_count = -1;
+    err = error_from_posix(wrapper_read(fd, buf, READ_BUFFER_SIZE, &read_count));
+    if (err) goto read_fail;
+
+    slice_t slice = {
+        .base = buf,
+        .len = (size_t) read_count,
+    };
+
+    if (self->input_shut && read_count == 0) {
+        self->eof = true;
+    }
+
+    err = self->on_read(loop, self, slice);
+    if (err) goto cb_fail;
+
+    if (self->eof) {
+        *handler_pending_mask(&self->handler) &= ~LOOP_READ;
+    }
+
+cb_fail:
+read_fail:
+    free(buf);
+
+calloc_fail:
+    if (err && self->on_read_error != NULL) {
+        err = self->on_read_error(loop, self, err);
+    }
+
+    return err;
+}
+
+static size_t iov_max = 0;
+static pthread_once_t iov_max_once = PTHREAD_ONCE_INIT;
+
+static void iov_max_init() {
+    long iov_size = -1;
+    error_t *err = error_wrap(
+        "Could not request the value of _SC_IOV_MAX",
+        error_from_posix(wrapper_sysconf(_SC_IOV_MAX, &iov_size))
+    );
+    if (err) {
+        error_log_free(&err, LOG_WARN, ERROR_VERBOSITY_SOURCE_CHAIN | ERROR_VERBOSITY_BACKTRACE);
+    } else if (iov_size > 0) {
+        iov_max = (size_t) iov_size;
+
+        return;
+    }
+
+    iov_max = 16;
+}
+
+static error_t *tcp_client_process_write_req(
+    tcp_handler_t *self,
+    loop_t *loop,
+    error_t *err,
+    bool *processed
+) {
+    error_assert(error_from_errno(pthread_once(&iov_max_once, iov_max_init)));
+
+    write_req_t *req = vec_wrreq_get_mut(&self->write_reqs, 0);
+
+    if (err) {
+        err = error_wrap("A previous write request has failed", err);
+
+        goto chained_error;
+    }
+
+    size_t first_unfinished_idx = 0;
+    size_t written_count = req->written_count;
+
+    for (; first_unfinished_idx < req->slice_count; ++first_unfinished_idx) {
+        if (written_count < req->slices[first_unfinished_idx].len) {
+            break;
+        }
+
+        written_count -= req->slices[first_unfinished_idx].len;
+    }
+
+    size_t iov_size = req->slice_count - first_unfinished_idx;
+
+    if (iov_size > iov_max) {
+        iov_size = iov_max;
+    }
+
+    vec_iovec_t iov = vec_iovec_new();
+    err = error_from_common(vec_iovec_resize(&iov, iov_size));
+    if (err) goto iov_resize_fail;
+
+    size_t write_requested = 0;
+
+    for (size_t i = first_unfinished_idx;
+            i < req->slice_count && vec_iovec_len(&iov) < iov_size;
+            ++i) {
+        slice_t slice = req->slices[i];
+        void *base = slice.base;
+        size_t len = slice.len;
+
+        if (i == first_unfinished_idx) {
+            base = (char *) base + written_count;
+            len -= written_count;
+        }
+
+        if (len == 0) {
+            continue;
+        }
+
+        write_requested += len;
+
+        vec_iovec_push(&iov, (struct iovec) {
+            .iov_base = base,
+            .iov_len = len,
+        });
+    }
+
+    ssize_t count = -1;
+    int fd = handler_fd(&self->handler);
+    err = error_from_posix(wrapper_writev(
+        fd,
+        vec_iovec_as_ptr(&iov),
+        (int) vec_iovec_len(&iov),
+        &count
+    ));
+    if (err) goto writev_fail;
+
+    written_count = req->written_count += (size_t) count;
+    assert(req->written_count < write_requested);
+
+    if (req->written_count == write_requested) {
+        err = req->on_write(loop, self);
+        if (err) goto cb_fail;
+    }
+
+    *processed = true;
+
+cb_fail:
+writev_fail:
+    vec_iovec_free(&iov);
+
+iov_resize_fail:
+chained_error:
+    if (err && req->on_error != NULL) {
+        err = req->on_error(loop, self, err, written_count);
+    }
+
+    if (err) {
+        *processed = true;
+    }
+
+    return err;
+}
+
+static error_t *tcp_client_drop_write_reqs(tcp_handler_t *self, loop_t *loop) {
+    error_t *err = NULL;
+
+    for (size_t i = 0; i < vec_wrreq_len(&self->write_reqs); ++i) {
+        write_req_t const *req = vec_wrreq_get(&self->write_reqs, i);
+
+        if (req->on_error != NULL) {
+            err = error_combine(err, req->on_error(loop, self, NULL, req->written_count));
+        }
+    }
+
+    vec_wrreq_clear(&self->write_reqs);
+
+    return err;
 }
 
 static error_t *tcp_client_handle_write(tcp_handler_t *self, loop_t *loop) {
-    TODO("handle LOOP_WRITE");
+    error_t *err = NULL;
+
+    while (!self->output_shut && vec_wrreq_len(&self->write_reqs) > 0) {
+        bool processed = false;
+        err = tcp_client_process_write_req(self, loop, err, &processed);
+
+        if (processed) {
+            // XXX: this makes it O(n²)
+            // a better choice would be a ring buffer
+            vec_wrreq_remove(&self->write_reqs, 0);
+        }
+    }
+
+    if (self->output_shut) {
+        err = error_combine(err, error_wrap(
+            "Encountered a failure while processing output shutdown",
+            tcp_client_drop_write_reqs(self, loop)
+        ));
+    }
+
+    if (vec_wrreq_len(&self->write_reqs) == 0) {
+        *handler_pending_mask(&self->handler) &= ~LOOP_WRITE;
+    }
+
+    return err;
 }
 
 static error_t *tcp_client_handle_established(
@@ -421,4 +633,119 @@ socket_fail:
 
 malloc_fail:
     return err;
+}
+
+error_t *tcp_server_listen(
+    tcp_handler_server_t *self,
+    int backlog,
+    tcp_server_on_new_conn_cb_t on_new_conn,
+    tcp_server_on_listen_error_cb_t on_error
+) {
+    error_t *err = NULL;
+
+    err = error_from_posix(wrapper_listen(handler_fd(&self->handler), backlog));
+    if (err) goto listen_fail;
+
+    self->on_new_conn = on_new_conn;
+    self->on_listen_error = on_error;
+    *handler_pending_mask(&self->handler) = LOOP_READ;
+
+listen_fail:
+    return err;
+}
+
+void tcp_read(tcp_handler_t *self, tcp_on_read_cb_t on_read, tcp_on_read_error_cb_t on_error) {
+    assert(self->state == TCP_HANDLER_ESTABLISHED);
+
+    self->on_read = on_read;
+    self->on_error = on_error;
+    *handler_pending_mask(&self->handler) |= LOOP_READ;
+}
+
+bool tcp_is_eof(tcp_handler_t const *self) {
+    return self->eof;
+}
+
+error_t *tcp_write(
+    tcp_handler_t *self,
+    size_t slice_count,
+    slice_t const slices[static slice_count],
+    tcp_on_write_cb_t on_write,
+    tcp_on_write_error_cb_t on_error
+) {
+    error_t *err = NULL;
+    err = error_wrap("The output has been shut down", OK_IF(!self->output_shut));
+    if (err) goto fail;
+
+    err = error_from_common(vec_wrreq_push(&self->write_reqs, (write_req_t) {
+        .slices = slices,
+        .slice_count = slice_count,
+        .written_count = 0,
+        .on_write = on_write,
+        .on_error = on_error,
+    }));
+    if (err) goto fail;
+
+    *handler_pending_mask(&self->handler) |= LOOP_WRITE;
+
+fail:
+    return err;
+}
+
+void tcp_shutdown_input(tcp_handler_t *self) {
+    if (self->input_shut) {
+        return;
+    }
+
+    error_t *err = error_from_posix(wrapper_shutdown(handler_fd(&self->handler), SHUT_RD));
+
+    if (err) {
+        error_log_free(&err, LOG_WARN, ERROR_VERBOSITY_SOURCE_CHAIN | ERROR_VERBOSITY_BACKTRACE);
+    }
+
+    self->input_shut = true;
+}
+
+void tcp_shutdown_output(tcp_handler_t *self) {
+    if (self->output_shut) {
+        return;
+    }
+
+    error_t *err = error_from_posix(wrapper_shutdown(handler_fd(&self->handler), SHUT_WR));
+
+    if (err) {
+        error_log_free(&err, LOG_WARN, ERROR_VERBOSITY_SOURCE_CHAIN | ERROR_VERBOSITY_BACKTRACE);
+    }
+
+    self->output_shut = true;
+}
+
+bool tcp_is_input_shutdown(const tcp_handler_t *self) {
+    return self->input_shut;
+}
+
+bool tcp_is_output_shutdown(const tcp_handler_t *self) {
+    return self->output_shut;
+}
+
+void *tcp_set_custom_data(tcp_handler_t *self, void *data) {
+    void *prev = self->custom_data;
+    self->custom_data = data;
+
+    return prev;
+}
+
+void *tcp_server_set_custom_data(tcp_handler_server_t *self, void *data) {
+    void *prev = self->custom_data;
+    self->custom_data = data;
+
+    return prev;
+}
+
+void *tcp_custom_data(tcp_handler_t const *self) {
+    return self->custom_data;
+}
+
+void *tcp_server_custom_data(tcp_handler_server_t const *self) {
+    return self->custom_data;
 }
