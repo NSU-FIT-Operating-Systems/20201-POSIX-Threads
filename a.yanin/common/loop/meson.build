@@ -14,7 +14,12 @@ modules += {
   'loop': declare_dependency(
     include_directories: 'include',
     link_with: library('common.loop', [
+        'src/executor.c',
+        'src/handler.c',
+        'src/io.c',
         'src/loop.c',
+        'src/pipe.c',
+        'src/tcp.c',
       ],
       dependencies: loop_deps,
       include_directories: 'include'),

@@ -17,6 +17,9 @@ typedef struct tcp_handler_server tcp_handler_server_t;
 // A regular TCP socket handler.
 // Can be safely upcast to `handler_t`.
 //
+// All the methods that take `self` as a parameter must be called from a synchronized context
+// (unless stated otherwise).
+//
 // Freeing the handler closes the underlying socket.
 typedef struct tcp_handler tcp_handler_t;
 
@@ -40,7 +43,7 @@ typedef error_t *(*tcp_server_on_listen_error_cb_t)(
     error_t *err
 );
 
-// Called whenever a socket is ready to read data from the remote peer.
+// Called whenever a socket has received data from the remote peer.
 typedef error_t *(*tcp_on_read_cb_t)(
     loop_t *loop,
     tcp_handler_t *handler,
@@ -117,10 +120,10 @@ bool tcp_is_eof(tcp_handler_t const *self);
 
 // Creates a new request to write to the socket.
 //
-// The request as added to the queue.
+// The request is added to the queue.
 // When the previously made requests have been processed, the handler will attempt to write the data
 // from the `slices`.
-// If multiple slices are provided, they are concatenated.
+// If multiple slices are provided, they are concatenated in array order.
 //
 // When all the data has been written, the `on_write` callback is invoked (unless `NULL`).
 //

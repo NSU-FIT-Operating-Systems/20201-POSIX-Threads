@@ -1,14 +1,17 @@
 #include "common/loop/tcp.h"
 
+#include <stdint.h>
+
 #include <netinet/in.h>
 
 #include <common/error-codes/adapter.h>
 #include <common/posix/adapter.h>
-#include <common/posix/io.h>
 #include <common/posix/file.h>
+#include <common/posix/io.h>
 #include <common/posix/proc.h>
 
 #include "common/loop/loop.h"
+#include "io.h"
 #include "util.h"
 
 enum {
@@ -16,20 +19,13 @@ enum {
 };
 
 typedef struct {
-    slice_t const *slices;
-    size_t slice_count;
-    size_t written_count;
+    write_req_t write_req;
     tcp_on_write_cb_t on_write;
     tcp_on_write_error_cb_t on_error;
-} write_req_t;
+} tcp_write_req_t;
 
-#define VEC_ELEMENT_TYPE write_req_t
+#define VEC_ELEMENT_TYPE tcp_write_req_t
 #define VEC_LABEL wrreq
-#define VEC_CONFIG (COLLECTION_DECLARE | COLLECTION_DEFINE | COLLECTION_STATIC)
-#include <common/collections/vec.h>
-
-#define VEC_ELEMENT_TYPE struct iovec
-#define VEC_LABEL iovec
 #define VEC_CONFIG (COLLECTION_DECLARE | COLLECTION_DEFINE | COLLECTION_STATIC)
 #include <common/collections/vec.h>
 
@@ -320,24 +316,41 @@ calloc_fail:
     return err;
 }
 
-static size_t iov_max = 0;
-static pthread_once_t iov_max_once = PTHREAD_ONCE_INIT;
+static write_req_t *tcp_client_process_write_req_get_req(void *self_opaque) {
+    tcp_handler_t *self = self_opaque;
 
-static void iov_max_init() {
-    long iov_size = -1;
-    error_t *err = error_wrap(
-        "Could not request the value of _SC_IOV_MAX",
-        error_from_posix(wrapper_sysconf(_SC_IOV_MAX, &iov_size))
-    );
-    if (err) {
-        error_log_free(&err, LOG_WARN, ERROR_VERBOSITY_SOURCE_CHAIN | ERROR_VERBOSITY_BACKTRACE);
-    } else if (iov_size > 0) {
-        iov_max = (size_t) iov_size;
+    return &vec_wrreq_get_mut(&self->write_reqs, 0)->write_req;
+}
 
-        return;
+static error_t *tcp_client_process_write_req_on_write(
+    void *self_opaque,
+    loop_t *loop,
+    write_req_t *req
+) {
+    tcp_handler_t *self = self_opaque;
+    tcp_write_req_t *tcp_req = (tcp_write_req_t *) req;
+
+    if (tcp_req->on_write != NULL) {
+        return tcp_req->on_write(loop, self);
+    } else {
+        return NULL;
     }
+}
 
-    iov_max = 16;
+static error_t *tcp_client_process_write_req_on_error(
+    void *self_opaque,
+    loop_t *loop,
+    write_req_t *req,
+    error_t *err
+) {
+    tcp_handler_t *self = self_opaque;
+    tcp_write_req_t *tcp_req = (tcp_write_req_t *) req;
+
+    if (tcp_req->on_error != NULL) {
+        return tcp_req->on_error(loop, self, err, req->written_count);
+    } else {
+        return err;
+    }
 }
 
 static error_t *tcp_client_process_write_req(
@@ -346,108 +359,26 @@ static error_t *tcp_client_process_write_req(
     error_t *err,
     bool *processed
 ) {
-    error_assert(error_from_errno(pthread_once(&iov_max_once, iov_max_init)));
-
-    write_req_t *req = vec_wrreq_get_mut(&self->write_reqs, 0);
-
-    if (err) {
-        err = error_wrap("A previous write request has failed", err);
-
-        goto chained_error;
-    }
-
-    size_t first_unfinished_idx = 0;
-    size_t written_count = req->written_count;
-
-    for (; first_unfinished_idx < req->slice_count; ++first_unfinished_idx) {
-        if (written_count < req->slices[first_unfinished_idx].len) {
-            break;
-        }
-
-        written_count -= req->slices[first_unfinished_idx].len;
-    }
-
-    size_t iov_size = req->slice_count - first_unfinished_idx;
-
-    if (iov_size > iov_max) {
-        iov_size = iov_max;
-    }
-
-    vec_iovec_t iov = vec_iovec_new();
-    err = error_from_common(vec_iovec_resize(&iov, iov_size));
-    if (err) goto iov_resize_fail;
-
-    size_t write_requested = 0;
-
-    for (size_t i = first_unfinished_idx;
-            i < req->slice_count && vec_iovec_len(&iov) < iov_size;
-            ++i) {
-        slice_t slice = req->slices[i];
-        void *base = slice.base;
-        size_t len = slice.len;
-
-        if (i == first_unfinished_idx) {
-            base = (char *) base + written_count;
-            len -= written_count;
-        }
-
-        if (len == 0) {
-            continue;
-        }
-
-        write_requested += len;
-
-        vec_iovec_push(&iov, (struct iovec) {
-            .iov_base = base,
-            .iov_len = len,
-        });
-    }
-
-    ssize_t count = -1;
-    int fd = handler_fd(&self->handler);
-    err = error_from_posix(wrapper_writev(
-        fd,
-        vec_iovec_as_ptr(&iov),
-        (int) vec_iovec_len(&iov),
-        &count
-    ));
-    if (err) goto writev_fail;
-
-    written_count = req->written_count += (size_t) count;
-    assert(req->written_count < write_requested);
-
-    if (req->written_count == write_requested) {
-        err = req->on_write(loop, self);
-        if (err) goto cb_fail;
-    }
-
-    *processed = true;
-
-cb_fail:
-writev_fail:
-    vec_iovec_free(&iov);
-
-iov_resize_fail:
-chained_error:
-    if (err && req->on_error != NULL) {
-        err = req->on_error(loop, self, err, written_count);
-    }
-
-    if (err) {
-        *processed = true;
-    }
-
-    return err;
+    return io_process_write_req(
+        self,
+        loop,
+        err,
+        processed,
+        handler_fd(&self->handler),
+        tcp_client_process_write_req_get_req,
+        tcp_client_process_write_req_on_write,
+        tcp_client_process_write_req_on_error
+    );
 }
 
 static error_t *tcp_client_drop_write_reqs(tcp_handler_t *self, loop_t *loop) {
     error_t *err = NULL;
 
     for (size_t i = 0; i < vec_wrreq_len(&self->write_reqs); ++i) {
-        write_req_t const *req = vec_wrreq_get(&self->write_reqs, i);
+        tcp_write_req_t const *req = vec_wrreq_get(&self->write_reqs, i);
 
         if (req->on_error != NULL) {
-            err = error_combine(err, req->on_error(loop, self, NULL, req->written_count));
+            err = error_combine(err, req->on_error(loop, self, NULL, req->write_req.written_count));
         }
     }
 
@@ -467,6 +398,10 @@ static error_t *tcp_client_handle_write(tcp_handler_t *self, loop_t *loop) {
             // XXX: this makes it O(n²)
             // a better choice would be a ring buffer
             vec_wrreq_remove(&self->write_reqs, 0);
+
+            if (!err) {
+                break;
+            }
         }
     }
 
@@ -538,6 +473,8 @@ static error_t *tcp_client_process(tcp_handler_t *self, loop_t *loop, poll_flags
     case TCP_HANDLER_ESTABLISHED:
         return tcp_client_handle_established(self, loop, flags);
     }
+
+    log_abort("self->state is invalid (%jd)", (intmax_t) self->state);
 }
 
 static error_t *tcp_client_on_error(tcp_handler_t *self, loop_t *loop, error_t *err) {
@@ -677,10 +614,12 @@ error_t *tcp_write(
     err = error_wrap("The output has been shut down", OK_IF(!self->output_shut));
     if (err) goto fail;
 
-    err = error_from_common(vec_wrreq_push(&self->write_reqs, (write_req_t) {
-        .slices = slices,
-        .slice_count = slice_count,
-        .written_count = 0,
+    err = error_from_common(vec_wrreq_push(&self->write_reqs, (tcp_write_req_t) {
+        .write_req = {
+            .slices = slices,
+            .slice_count = slice_count,
+            .written_count = 0,
+        },
         .on_write = on_write,
         .on_error = on_error,
     }));
