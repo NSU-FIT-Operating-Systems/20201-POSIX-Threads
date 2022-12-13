@@ -164,13 +164,3 @@ void tcp_shutdown_output(tcp_handler_t *self);
 
 bool tcp_is_input_shutdown(tcp_handler_t const *self);
 bool tcp_is_output_shutdown(tcp_handler_t const *self);
-
-// Associates custom opaque `data` with this handler.
-//
-// Returns the previously set value (defaults to `NULL`).
-void *tcp_set_custom_data(tcp_handler_t *self, void *data);
-void *tcp_server_set_custom_data(tcp_handler_server_t *self, void *data);
-
-// Returns the opaque data associated with this handler.
-void *tcp_custom_data(tcp_handler_t const *self);
-void *tcp_server_custom_data(tcp_handler_server_t const *self);

@@ -42,7 +42,6 @@ typedef enum {
 
 struct tcp_handler_server {
     handler_t handler;
-    void *custom_data;
     tcp_server_on_new_conn_cb_t on_new_conn;
     tcp_server_on_listen_error_cb_t on_listen_error;
     tcp_server_on_error_cb_t on_error;
@@ -72,7 +71,6 @@ struct tcp_handler {
         };
     } peer_address;
     error_t *pending_error;
-    void *custom_data;
     tcp_handler_state_t state;
     bool input_shut;
     bool output_shut;
@@ -156,7 +154,6 @@ error_t *tcp_server_new(struct sockaddr *addr, socklen_t addrlen, tcp_handler_se
     if (err) goto fcntl_fail;
 
     handler_init(&self->handler, &tcp_server_vtable, fd);
-    self->custom_data = NULL;
     self->on_new_conn = NULL;
     self->on_listen_error = NULL;
     self->on_error = NULL;
@@ -498,7 +495,6 @@ static void client_init(tcp_handler_t *self, int fd) {
     self->on_connect = NULL;
     self->on_connect_error = NULL;
     self->pending_error = NULL;
-    self->custom_data = NULL;
     self->state = TCP_HANDLER_CONNECTING;
     self->input_shut = false;
     self->output_shut = false;
@@ -665,26 +661,4 @@ bool tcp_is_input_shutdown(const tcp_handler_t *self) {
 
 bool tcp_is_output_shutdown(const tcp_handler_t *self) {
     return self->output_shut;
-}
-
-void *tcp_set_custom_data(tcp_handler_t *self, void *data) {
-    void *prev = self->custom_data;
-    self->custom_data = data;
-
-    return prev;
-}
-
-void *tcp_server_set_custom_data(tcp_handler_server_t *self, void *data) {
-    void *prev = self->custom_data;
-    self->custom_data = data;
-
-    return prev;
-}
-
-void *tcp_custom_data(tcp_handler_t const *self) {
-    return self->custom_data;
-}
-
-void *tcp_server_custom_data(tcp_handler_server_t const *self) {
-    return self->custom_data;
 }

@@ -8,6 +8,7 @@
 
 void handler_init(handler_t *self, handler_vtable_t const *vtable, int fd) {
     self->vtable = vtable;
+    self->custom_data = NULL;
     self->fd = fd;
     self->status = LOOP_HANDLER_READY;
     self->passive = false;
@@ -50,4 +51,15 @@ void handler_unlock(handler_t *self) {
 
 void handler_force(handler_t *self) {
     self->force = true;
+}
+
+void *handler_custom_data(handler_t const *self) {
+    return self->custom_data;
+}
+
+void *handler_set_custom_data(handler_t *self, void *data) {
+    void *prev = self->custom_data;
+    self->custom_data = data;
+
+    return prev;
 }
