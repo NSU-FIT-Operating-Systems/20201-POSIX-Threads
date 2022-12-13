@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdarg.h>
+#include <stdbool.h>
 
 #define LOG_MODE_UNSYNC 0
 #define LOG_MODE_SYNC 1
@@ -24,6 +25,10 @@ static inline void log_unlock(void) {
 
 #endif
 
+#ifndef LOG_LEVEL
+#define LOG_LEVEL LOG_DEBUG
+#endif
+
 typedef enum {
     LOG_DEBUG,
     LOG_INFO,
@@ -35,8 +40,14 @@ void log_vprintf_impl(log_level_t level, char const *fmt, va_list args);
 void log_write_impl(log_level_t level, char const *str);
 void log_vwritef_impl(log_level_t level, char const *fmt, va_list args);
 
+static inline bool log_level_filtered(log_level_t level) {
+    return level < LOG_LEVEL;
+}
+
 [[gnu::format(printf, 2, 3)]]
 static inline void log_printf(log_level_t level, char const *fmt, ...) {
+    if (log_level_filtered(level)) return;
+
     log_lock();
 
     va_list args;
@@ -47,12 +58,16 @@ static inline void log_printf(log_level_t level, char const *fmt, ...) {
 }
 
 static inline void log_write(log_level_t level, char const *str) {
+    if (log_level_filtered(level)) return;
+
     log_lock();
     log_write_impl(level, str);
     log_unlock();
 }
 
 static inline void log_vwritef(log_level_t level, char const *fmt, va_list args) {
+    if (log_level_filtered(level)) return;
+
     log_lock();
     log_vwritef_impl(level, fmt, args);
     log_unlock();
