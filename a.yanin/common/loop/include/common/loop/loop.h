@@ -37,15 +37,7 @@ typedef error_t *errorp_t;
 #define VEC_CONFIG (COLLECTION_DECLARE)
 #include <common/collections/vec.h>
 
-typedef struct loop {
-    vec_handler_t handlers;
-    pthread_mutex_t pending_mtx;
-    vec_handler_t pending_handlers;
-    pthread_mutex_t error_mtx;
-    vec_error_t errors;
-    executor_t *executor;
-    atomic_bool stopped;
-} loop_t;
+typedef struct loop loop_t;
 
 typedef enum {
     LOOP_READ = POLLIN,
@@ -115,8 +107,8 @@ struct handler {
     poll_flags_t pending_flags;
 };
 
-// Initializes a new instance of `loop_t`.
-void loop_init(loop_t *self, executor_t *executor);
+// Create a new instance of `loop_t`.
+error_t *loop_init(executor_t *executor, loop_t **result);
 
 // Frees the resources allocated by `self`.
 //

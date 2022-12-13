@@ -1,9 +1,10 @@
 #include "common/loop/loop.h"
 
-#include <common/error-codes/adapter.h>
 #include <stdatomic.h>
 
-#include "common/posix/adapter.h"
+#include <common/error-codes/adapter.h>
+#include <common/posix/adapter.h>
+
 #include "util.h"
 
 #define ARC_LABEL handler
@@ -44,7 +45,23 @@ typedef struct {
 #define VEC_CONFIG (COLLECTION_DECLARE | COLLECTION_DEFINE | COLLECTION_STATIC)
 #include <common/collections/vec.h>
 
-void loop_init(loop_t *self, executor_t *executor) {
+struct loop {
+    vec_handler_t handlers;
+    pthread_mutex_t pending_mtx;
+    vec_handler_t pending_handlers;
+    pthread_mutex_t error_mtx;
+    vec_error_t errors;
+    executor_t *executor;
+    atomic_bool stopped;
+};
+
+error_t *loop_init(executor_t *executor, loop_t **result) {
+    error_t *err = NULL;
+
+    loop_t *self = calloc(1, sizeof(loop_t));
+    err = error_wrap("Could not allocate memory for the loop", OK_IF(self != NULL));
+    if (err) goto calloc_fail;
+
     self->handlers = vec_handler_new();
     self->pending_handlers = vec_handler_new();
     self->errors = vec_error_new();
@@ -62,6 +79,13 @@ void loop_init(loop_t *self, executor_t *executor) {
         pthread_mutex_init(&self->error_mtx, &mtx_attr))));
 
     pthread_mutexattr_destroy(&mtx_attr);
+
+    *result = self;
+
+    return err;
+
+calloc_fail:
+    return err;
 }
 
 void loop_free(loop_t *self) {

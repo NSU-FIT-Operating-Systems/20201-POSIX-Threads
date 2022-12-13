@@ -18,6 +18,7 @@ modules += {
         'src/handler.c',
         'src/io.c',
         'src/loop.c',
+        'src/notify.c',
         'src/pipe.c',
         'src/tcp.c',
       ],
