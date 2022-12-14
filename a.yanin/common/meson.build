@@ -56,5 +56,8 @@ subdir('posix.adapter')
 # The base definitions for the executors.
 subdir('executor')
 
+# A single-threaded blocking executor.
+subdir('executor.single')
+
 # An asynchronous event loop.
 subdir('loop')

@@ -39,6 +39,7 @@ typedef struct {
     executor_vtable_shutdown_t shutdown;
 } executor_vtable_t;
 
+// An abstract executor struct included in concrete executor implementations.
 struct executor {
     executor_vtable_t const *vtable;
 };
