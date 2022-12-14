@@ -157,7 +157,7 @@ error_t *tcp_server_new(struct sockaddr *addr, socklen_t addrlen, tcp_handler_se
     self->on_new_conn = NULL;
     self->on_listen_error = NULL;
     self->on_error = NULL;
-    *handler_pending_mask(&self->handler) = LOOP_READ;
+    handler_set_pending_mask(&self->handler, LOOP_READ);
 
     *result = self;
 
@@ -214,7 +214,7 @@ static void tcp_client_free(tcp_handler_t *self) {
 static error_t *tcp_client_handle_connect_fail(tcp_handler_t *self, loop_t *loop, error_t *err) {
     assert(self->state == TCP_HANDLER_FAIL);
 
-    *handler_pending_mask(&self->handler) = 0;
+    handler_set_pending_mask(&self->handler, 0);
 
     if (self->on_connect_error != NULL) {
         err = self->on_connect_error(loop, self, err);
@@ -227,7 +227,7 @@ static error_t *tcp_client_handle_connected(tcp_handler_t *self, loop_t *loop, p
     assert(self->state == TCP_HANDLER_CONNECTED);
 
     error_t *err = NULL;
-    *handler_pending_mask(&self->handler) = 0;
+    handler_set_pending_mask(&self->handler, 0);
 
     if (flags & LOOP_ERR) {
         err = get_socket_error(handler_fd(&self->handler));
@@ -298,7 +298,9 @@ static error_t *tcp_client_handle_read(tcp_handler_t *self, loop_t *loop) {
     if (err) goto cb_fail;
 
     if (self->eof) {
-        *handler_pending_mask(&self->handler) &= ~LOOP_READ;
+        poll_flags_t flags = handler_pending_mask(&self->handler);
+        flags &= ~LOOP_READ;
+        handler_set_pending_mask(&self->handler, flags);
     }
 
 cb_fail:
@@ -410,7 +412,9 @@ static error_t *tcp_client_handle_write(tcp_handler_t *self, loop_t *loop) {
     }
 
     if (vec_wrreq_len(&self->write_reqs) == 0) {
-        *handler_pending_mask(&self->handler) &= ~LOOP_WRITE;
+        poll_flags_t flags = handler_pending_mask(&self->handler);
+        flags &= ~LOOP_WRITE;
+        handler_set_pending_mask(&self->handler, flags);
     }
 
     return err;
@@ -543,7 +547,7 @@ error_t *tcp_connect(
     }
 
     if (state == TCP_HANDLER_CONNECTING) {
-        *handler_pending_mask(&self->handler) = LOOP_WRITE;
+        handler_set_pending_mask(&self->handler, LOOP_WRITE);
     } else {
         handler_force(&self->handler);
     }
@@ -581,7 +585,7 @@ error_t *tcp_server_listen(
 
     self->on_new_conn = on_new_conn;
     self->on_listen_error = on_error;
-    *handler_pending_mask(&self->handler) = LOOP_READ;
+    handler_set_pending_mask(&self->handler, LOOP_READ);
 
 listen_fail:
     return err;
@@ -592,7 +596,15 @@ void tcp_read(tcp_handler_t *self, tcp_on_read_cb_t on_read, tcp_on_read_error_c
 
     self->on_read = on_read;
     self->on_error = on_error;
-    *handler_pending_mask(&self->handler) |= LOOP_READ;
+    poll_flags_t flags = handler_pending_mask(&self->handler);
+
+    if (self->on_read != NULL) {
+        flags |= LOOP_READ;
+    } else {
+        flags &= ~LOOP_READ;
+    }
+
+    handler_set_pending_mask(&self->handler, flags);
 }
 
 bool tcp_is_eof(tcp_handler_t const *self) {
@@ -621,7 +633,9 @@ error_t *tcp_write(
     }));
     if (err) goto fail;
 
-    *handler_pending_mask(&self->handler) |= LOOP_WRITE;
+    poll_flags_t flags = handler_pending_mask(&self->handler);
+    flags |= LOOP_WRITE;
+    handler_set_pending_mask(&self->handler, flags);
 
 fail:
     return err;

@@ -94,6 +94,7 @@ typedef struct {
 struct handler {
     handler_vtable_t const *vtable;
     void *custom_data;
+    loop_t *loop;
     int fd;
     _Atomic(loop_handler_status_t) status;
     // passive handles don't block the loop from stopping even if they are
@@ -168,7 +169,12 @@ poll_flags_t handler_current_mask(handler_t const *self);
 // Returns the event mask to be applied on the next iteration of the loop.
 //
 // This method must be called from a synchronized context.
-poll_flags_t *handler_pending_mask(handler_t *self);
+poll_flags_t handler_pending_mask(handler_t const *self);
+
+// Set the event mask to be applied on the next iteration of the loop.
+//
+// This method must be called from a synchronized context.
+poll_flags_t handler_set_pending_mask(handler_t *self, poll_flags_t flags);
 
 // Lock the handler, establishing a synchronized context.
 //
@@ -183,7 +189,7 @@ void handler_unlock(handler_t *self);
 // Returns the fd managed by the handler.
 int handler_fd(handler_t const *self);
 
-// Forces the handler's process method to be called on the next loop iteration,
+// Forces the handler's process method to be called on the next (or current) loop iteration,
 // regardless of whether it has any I/O events pending.
 void handler_force(handler_t *self);
 

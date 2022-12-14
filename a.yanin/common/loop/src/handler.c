@@ -9,6 +9,7 @@
 void handler_init(handler_t *self, handler_vtable_t const *vtable, int fd) {
     self->vtable = vtable;
     self->custom_data = NULL;
+    self->loop = NULL;
     self->fd = fd;
     self->status = LOOP_HANDLER_READY;
     self->passive = false;
@@ -37,8 +38,19 @@ poll_flags_t handler_current_mask(handler_t const *self) {
     return self->current_flags;
 }
 
-poll_flags_t *handler_pending_mask(handler_t *self) {
-    return &self->pending_flags;
+poll_flags_t handler_pending_mask(handler_t const *self) {
+    return self->pending_flags;
+}
+
+poll_flags_t handler_set_pending_mask(handler_t *self, poll_flags_t flags) {
+    poll_flags_t prev = flags;
+    self->pending_flags = flags;
+
+    if (prev != flags && self->loop != NULL) {
+        loop_interrupt(self->loop);
+    }
+
+    return prev;
 }
 
 void handler_lock(handler_t *self) {
@@ -51,6 +63,10 @@ void handler_unlock(handler_t *self) {
 
 void handler_force(handler_t *self) {
     self->force = true;
+
+    if (self->loop != NULL) {
+        loop_interrupt(self->loop);
+    }
 }
 
 void *handler_custom_data(handler_t const *self) {

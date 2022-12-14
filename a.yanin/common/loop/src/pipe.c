@@ -121,7 +121,7 @@ static error_t *pipe_handler_wr_process(pipe_handler_wr_t *self, loop_t *loop, p
     }
 
     if (vec_wrreq_len(&self->write_reqs) == 0) {
-        *handler_pending_mask(&self->handler) = 0;
+        handler_set_pending_mask(&self->handler, 0);
     }
 
     return err;
@@ -164,7 +164,9 @@ static error_t *pipe_handler_rd_process(pipe_handler_rd_t *self, loop_t *loop, p
     if (err) goto cb_fail;
 
     if (self->eof) {
-        *handler_pending_mask(&self->handler) &= ~LOOP_READ;
+        poll_flags_t flags = handler_pending_mask(&self->handler);
+        flags &= ~LOOP_READ;
+        handler_set_pending_mask(&self->handler, flags);
     }
 
 cb_fail:
@@ -238,7 +240,12 @@ wr_malloc_fail:
 void pipe_read(pipe_handler_rd_t *self, pipe_on_read_cb_t on_read, pipe_rd_on_error_cb_t on_error) {
     self->on_read = on_read;
     self->on_error = on_error;
-    *handler_pending_mask(&self->handler) = LOOP_READ;
+
+    if (on_read != NULL) {
+        handler_set_pending_mask(&self->handler, LOOP_READ);
+    } else {
+        handler_set_pending_mask(&self->handler, 0);
+    }
 }
 
 bool pipe_is_eof(pipe_handler_rd_t const *self) {
@@ -263,7 +270,7 @@ error_t *pipe_write(
     }));
     if (err) goto fail;
 
-    *handler_pending_mask(&self->handler) = LOOP_WRITE;
+    handler_set_pending_mask(&self->handler, LOOP_WRITE);
 
 fail:
     return err;

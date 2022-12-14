@@ -184,6 +184,8 @@ static error_t *loop_process_registrations(loop_t *self) {
 
         err = error_from_common(vec_handler_push(&self->handlers, handler));
         if (err) goto push_fail;
+
+        arc_handler_get(handler)->loop = self;
     }
 
 push_fail:

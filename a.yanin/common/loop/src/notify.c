@@ -129,8 +129,8 @@ void notify_set_cb(notify_t *self, notify_cb_t on_notified) {
     self->on_notified = on_notified;
 
     if (on_notified == NULL) {
-        *handler_pending_mask(&self->handler) = 0;
+        handler_set_pending_mask(&self->handler, 0);
     } else {
-        *handler_pending_mask(&self->handler) = LOOP_READ;
+        handler_set_pending_mask(&self->handler, LOOP_READ);
     }
 }
