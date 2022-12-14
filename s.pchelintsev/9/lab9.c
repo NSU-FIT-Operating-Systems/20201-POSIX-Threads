@@ -8,8 +8,7 @@
 #include <stdbool.h>
 #include <signal.h>
 
-#define NUM_STEPS 			200000000
-#define SIGNALCHECK_STEPS 	1000000
+#define BLOCK_SIZE 15000000
 
 static bool die = false;
 
@@ -20,8 +19,6 @@ static void sigint_handler(int sig) {
 }
 
 typedef struct work_t {
-	uint64_t start;
-	uint64_t iterAmt;
 	int id;
 	double result;
 
@@ -32,24 +29,23 @@ pthread_mutex_t mtx;
 pthread_cond_t cv;
 bool letsgo = false;
 
+int global = 0;
+
 void doThreadWork(void* arg) {
 	ThreadWork* work = (ThreadWork*)arg;
 
 	double ret = 0;
-	uint64_t iterTo = work->start + work->iterAmt;
+	uint64_t i = 0;
 
-	uint64_t i = work->start;
-	uint64_t curIterTo = i + SIGNALCHECK_STEPS;
+	while (1) {
+		int block = __atomic_fetch_add(&global, 1, __ATOMIC_SEQ_CST);
+		i = (uint64_t)block * BLOCK_SIZE;
+		uint64_t end = i + BLOCK_SIZE;
 
-	while (i < iterTo) {
-		for (; i < curIterTo; i++) {
+		for (; i < end; i++) {
 			ret += 1.0 / (i * 4.0 + 1.0);
 			ret -= 1.0 / (i * 4.0 + 3.0);
 		}
-
-		curIterTo += SIGNALCHECK_STEPS;
-		if (curIterTo > iterTo)
-			curIterTo = iterTo;
 
 		if (die) {
 			work->result = ret * 4;
@@ -57,9 +53,6 @@ void doThreadWork(void* arg) {
 			break; // ?
 		}
 	}
-
-	work->result = ret * 4;
-	pthread_exit(NULL);
 }
 
 void* countPartialSum(void* arg) {
@@ -89,8 +82,6 @@ int main(int argc, char** argv) {
 	int threadAmt = atoi(argv[1]);
 	int real_threadAmt = threadAmt;
 
-	unsigned long long iterAmt = NUM_STEPS;
-
 	if (threadAmt < 1) {
 		printf("\"%s\" isn't a valid thread count.\n", argv[1]);
 		printUsage();
@@ -99,7 +90,6 @@ int main(int argc, char** argv) {
 	if (argc >= 3) { // 2nd, optional arg passed: iter amt
 		long long newIter = strtoll(argv[2], NULL, 10);
 		if (errno != ERANGE) {
-			iterAmt = newIter;
 			printf("Using a custom iteration count: %lld\n", newIter);
 		} else {
 			printf("Couldn't recognize \"%s\" as an iteration count.", argv[2]);
@@ -120,9 +110,6 @@ int main(int argc, char** argv) {
 
 	// i don't know if VLA > malloc
 	ThreadWork* works = malloc(threadAmt * sizeof(ThreadWork));
-
-	unsigned long long itersLeft = iterAmt - 1;
-	unsigned long long curStart = 1;
 
 	pthread_cond_init(&cv, NULL);
 	pthread_mutex_init(&mtx, NULL);
@@ -146,19 +133,11 @@ int main(int argc, char** argv) {
 		pthread_exit(NULL);
 	}
 
-	printf("%d threads created...\n", actual_threads);
+	printf("%d threads created...\n\tAwaiting Ctrl+C.\n", actual_threads);
 
 	for (int i = 0; i < actual_threads; i++) {
-		unsigned long long toIter = iterAmt / actual_threads;
-		toIter = itersLeft < toIter ? itersLeft : toIter;
-
 		ThreadWork* wrk = &works[i];
-		wrk->start = curStart;
-		wrk->iterAmt = i == (actual_threads - 1) ? itersLeft : toIter;
 		wrk->id = i;
-
-		itersLeft -= toIter;
-		curStart += toIter;
 	}
 
 	pthread_mutex_lock(&mtx);
@@ -166,7 +145,7 @@ int main(int argc, char** argv) {
 	pthread_cond_broadcast(&cv);
 	pthread_mutex_unlock(&mtx);
 
-	double pi = 8.0 / 3.0;
+	double pi = 0;
 	double real_pi = M_PI;
 
 	for (int i = 0; i < actual_threads; i++){
