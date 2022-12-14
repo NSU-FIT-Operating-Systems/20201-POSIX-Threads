@@ -63,8 +63,6 @@ static void firstInit() {
 
 void* thread_cpyDir(void* wrk) {
 	ThreadWork* work = (ThreadWork*)wrk;
-	pthread_mutex_lock(&work->sync); // epic syncing
-	pthread_mutex_unlock(&work->sync);
 
 	// printf("thread: copy %s %s -> %s\n",
 	// 	work->isDir ? "directory" : "file", work->src, work->dest);
@@ -248,27 +246,10 @@ int cpyDir(const char* from, const char* to) {
 			goto cleanup;
 		}
 
-		pthread_mutex_lock(&wrk->sync);
-
 		wrk->src = NULL;
 		wrk->dest = NULL;
 		bool madeThread = false;
 
-		while (1) {
-			int ok = pthread_create(&wrk->thread, &attr, thread_cpyDir, wrk);
-			if (ok == 0) break;
-
-			if (ok == EAGAIN) {
-				// thread limit; maybe if we just sleep a bit
-				__atomic_fetch_add(&globals.EAGAIN_counter, 1, __ATOMIC_SEQ_CST);
-				printf("sleeping, EAGAIN: %d, active threads: %d\n", globals.EAGAIN_counter, globals.active_threads);
-				sleep(1);
-				continue;
-			} else {
-				perror("failed to create copy thread; aborting copy.");
-				goto cleanup_thread;
-			}
-		}
 
 		errno = 0;
 		madeThread = true;
@@ -300,7 +281,21 @@ int cpyDir(const char* from, const char* to) {
 		assert(result->d_type != DT_UNKNOWN); // please god no
 		wrk->isDir = result->d_type == DT_DIR;
 
-		pthread_mutex_unlock(&wrk->sync);
+		while (1) {
+			int ok = pthread_create(&wrk->thread, &attr, thread_cpyDir, wrk);
+			if (ok == 0) break;
+
+			if (ok == EAGAIN) {
+				// thread limit; maybe if we just sleep a bit
+				__atomic_fetch_add(&globals.EAGAIN_counter, 1, __ATOMIC_SEQ_CST);
+				printf("sleeping, EAGAIN: %d, active threads: %d\n", globals.EAGAIN_counter, globals.active_threads);
+				sleep(1);
+				continue;
+			} else {
+				perror("failed to create copy thread; aborting copy.");
+				goto cleanup_thread;
+			}
+		}
 
 		i++;
 
