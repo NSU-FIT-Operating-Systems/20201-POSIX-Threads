@@ -5,6 +5,7 @@
 #include <common/error-codes/adapter.h>
 #include <common/posix/adapter.h>
 
+#include "common/loop/notify.h"
 #include "util.h"
 
 #define ARC_LABEL handler
@@ -52,10 +53,16 @@ struct loop {
     pthread_mutex_t error_mtx;
     vec_error_t errors;
     executor_t *executor;
+    // this is a weak reference to `notify`
+    notify_t *notify;
     atomic_bool stopped;
 };
 
-error_t *loop_init(executor_t *executor, loop_t **result) {
+static error_t *loop_on_notified(loop_t *, notify_t *) {
+    return NULL;
+}
+
+error_t *loop_new(executor_t *executor, loop_t **result) {
     error_t *err = NULL;
 
     loop_t *self = calloc(1, sizeof(loop_t));
@@ -67,6 +74,14 @@ error_t *loop_init(executor_t *executor, loop_t **result) {
     self->errors = vec_error_new();
     self->executor = executor;
     self->stopped = false;
+
+    err = error_wrap("Could not initialize the notification mechanism", notify_new(&self->notify));
+    if (err) goto notify_fail;
+
+    notify_set_cb(self->notify, loop_on_notified);
+    ((handler_t *) self->notify)->passive = true;
+    arc_handler_t *notify = arc_handler_new((handler_t *) self->notify);
+    vec_handler_push(&self->pending_handlers, notify);
 
     pthread_mutexattr_t mtx_attr;
     error_assert(error_wrap("Could not initialize mutex attributes",
@@ -83,6 +98,9 @@ error_t *loop_init(executor_t *executor, loop_t **result) {
     *result = self;
 
     return err;
+
+notify_fail:
+    free(self);
 
 calloc_fail:
     return err;
@@ -496,4 +514,8 @@ fail:
 
 void loop_stop(loop_t *self) {
     self->stopped = true;
+}
+
+void loop_interrupt(loop_t *self) {
+    notify_post(self->notify);
 }

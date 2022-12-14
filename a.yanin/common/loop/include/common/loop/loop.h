@@ -108,7 +108,7 @@ struct handler {
 };
 
 // Create a new instance of `loop_t`.
-error_t *loop_init(executor_t *executor, loop_t **result);
+error_t *loop_new(executor_t *executor, loop_t **result);
 
 // Frees the resources allocated by `self`.
 //
@@ -146,6 +146,9 @@ error_t *loop_run(loop_t *self);
 //
 // See `loop_unregister`.
 void loop_stop(loop_t *self);
+
+// Forcibly interrupts the next (or the current) iteration of the loop.
+void loop_interrupt(loop_t *self);
 
 // Initializes the `handle_t` struct.
 //

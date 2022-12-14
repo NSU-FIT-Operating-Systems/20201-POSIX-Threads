@@ -2,28 +2,18 @@
 
 #include <common/loop/loop.h>
 
-typedef struct notify notify_t;
-
-// The notification callback.
-typedef error_t *(*notify_cb_t)(loop_t *loop, notify_t *notify);
-
 // A basic notification mechanism.
 //
 // You could think of this as a kind of atomic flag that works with `loop_t`.
 // Posting a notification raises it; once the notification callback is invoked, the flag is reset.
 // Accordingly, posting multiple notifications schedules only one invocation.
-struct notify {
-    handler_t handler;
+typedef struct notify notify_t;
 
-    pthread_mutex_t mtx;
-    int wr_fd;
+// The notification callback.
+typedef error_t *(*notify_cb_t)(loop_t *loop, notify_t *notify);
 
-    notify_cb_t on_notified;
-    bool raised;
-};
-
-// Initializes a new instance of `notify_t`.
-error_t *notify_init(notify_t *self);
+// Creates a new instance of `notify_t`.
+error_t *notify_new(notify_t **result);
 
 // Posts a notification on `self`.
 //
