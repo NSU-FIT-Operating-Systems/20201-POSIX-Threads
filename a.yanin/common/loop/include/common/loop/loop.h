@@ -6,9 +6,8 @@
 #include <pthread.h>
 
 #include <common/error.h>
+#include <common/executor/executor.h>
 #include <common/posix/io.h>
-
-#include "common/loop/executor.h"
 
 typedef struct handler handler_t;
 

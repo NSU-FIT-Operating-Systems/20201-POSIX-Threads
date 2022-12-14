@@ -1,4 +1,4 @@
-#include "common/loop/executor.h"
+#include <common/executor/executor.h>
 
 void executor_init(executor_t *self, executor_vtable_t const *vtable) {
     self->vtable = vtable;

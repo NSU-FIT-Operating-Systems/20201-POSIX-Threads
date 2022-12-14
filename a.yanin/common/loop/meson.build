@@ -4,6 +4,7 @@ loop_deps = [
   modules['collections.vec'],
   modules['error'],
   modules['error-codes.adapter'],
+  modules['executor'],
   modules['log'],
   modules['memory.arc'],
   modules['posix'],
@@ -14,7 +15,6 @@ modules += {
   'loop': declare_dependency(
     include_directories: 'include',
     link_with: library('common.loop', [
-        'src/executor.c',
         'src/handler.c',
         'src/io.c',
         'src/loop.c',

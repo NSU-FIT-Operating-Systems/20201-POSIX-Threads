@@ -53,5 +53,8 @@ subdir('error-codes.adapter')
 # Implements the `error` interface for `posix_err_t`.
 subdir('posix.adapter')
 
+# The base definitions for the executors.
+subdir('executor')
+
 # An asynchronous event loop.
 subdir('loop')
