@@ -16,22 +16,21 @@ namespace io_operations {
         return message->len + 1 + 8;
     }
 
-    message *concat_messages(message *a, message *b) {
+    bool append_message(message *a, message *b) {
         assert(a);
         assert(b);
-        char *new_buf = (char *) malloc(a->len + b->len + 1);
-        if (new_buf == nullptr) {
-            return nullptr;
+        size_t required_length = a->len + b->len + 1;
+        while (a->capacity < required_length) {
+            a->capacity *= 2;
+            char *temp = (char *) realloc((void *) a->data, a->capacity);
+            if (temp == nullptr) {
+                return false;
+            }
+            a->data = temp;
         }
-        memcpy(new_buf, a->data, a->len);
-        memcpy(new_buf + a->len, b->data, b->len);
-        new_buf[a->len + b->len] = '\0';
-        auto *res = new message();
-        res->data = new_buf;
-        res->len = a->len + b->len;
-        delete a;
-        delete b;
-        return res;
+        memcpy((void *) (a->data + a->len), b->data, b->len);
+        a->len += b->len;
+        return true;
     }
 
     bool write_all(int fd, message *message) {
@@ -102,6 +101,7 @@ namespace io_operations {
                     auto *message = new struct message;
                     message->data = buffer;
                     message->len = offset;
+                    message->capacity = capacity;
                     return message;
                 } else {
                     free(buffer);
@@ -122,6 +122,7 @@ namespace io_operations {
         auto *message = new struct message;
         message->data = buffer;
         message->len = offset;
+        message->capacity = capacity;
         return message;
     }
 

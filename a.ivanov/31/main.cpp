@@ -52,7 +52,7 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "%s\n", USAGE_GUIDE);
         return EXIT_FAILURE;
     }
-    proxy *p = new single_thread_proxy::http_proxy();
+    proxy *p = new single_thread_proxy::http_proxy(args.print_allowed);
     p->run(args.proxy_port);
     delete p;
     return EXIT_SUCCESS;

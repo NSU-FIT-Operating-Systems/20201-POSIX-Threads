@@ -23,6 +23,7 @@ namespace single_thread_proxy {
     typedef struct resource_info {
         httpparser::HttpResponseParser::ParseResult status = httpparser::HttpResponseParser::ParsingIncompleted;
         io_operations::message *data = nullptr;
+        size_t content_length = 0;
         bool free_message = true;
         // vector of socket descriptors of clients who wait for the resource
         std::set<int> subscribers = std::set<int>();
@@ -55,7 +56,7 @@ namespace single_thread_proxy {
     class http_proxy final : public proxy {
     public:
 
-        http_proxy();
+        explicit http_proxy(bool print_allowed);
 
         ~http_proxy() final;
 
@@ -64,6 +65,11 @@ namespace single_thread_proxy {
         void shutdown() final;
 
     private:
+        void log(const std::string &msg) const;
+
+        void log_error(const std::string &msg) const;
+
+        void log_error_with_errno(const std::string &msg) const;
 
         int init_and_bind_proxy_socket(int port);
 
@@ -87,6 +93,7 @@ namespace single_thread_proxy {
 
         size_t cache_size_bytes();
 
+        bool print_allowed = false;
         bool is_running = false;
         int proxy_socket = 0;
         io_operations::select_data *selected;

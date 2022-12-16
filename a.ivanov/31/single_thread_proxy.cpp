@@ -22,20 +22,22 @@ namespace single_thread_proxy {
     static const int HTTP_PORT = 80;
     int signal_pipe[2];
 
-    void log(const std::string &msg) {
+    void http_proxy::log(const std::string &msg) const {
+        if (!print_allowed) return;
         std::cout << "[PROXY] " << msg << std::endl;
     }
 
-    void log_error(const std::string &msg) {
+    void http_proxy::log_error(const std::string &msg) const {
+        if (!print_allowed) return;
         std::cerr << "[PROXY] " << msg << std::endl;
     }
 
-    void log_error_with_errno(const std::string &msg) {
+    void http_proxy::log_error_with_errno(const std::string &msg) const {
+        if (!print_allowed) return;
         perror(("[PROXY] " + msg).data());
     }
 
     void send_terminate(__attribute__((unused)) int sig) {
-        log_error("Terminate");
         auto *terminate = new io_operations::message();
         char *cmd = (char *) malloc(strlen(TERMINATE_CMD) + 1);
         if (cmd == nullptr) {
@@ -51,7 +53,6 @@ namespace single_thread_proxy {
     int init_signal_handlers() {
         int return_value = pipe(signal_pipe);
         if (return_value == status_code::FAIL) {
-            log_error_with_errno("Error in pipe");
             return status_code::FAIL;
         }
         signal(SIGINT, send_terminate);
@@ -158,7 +159,8 @@ namespace single_thread_proxy {
         }
     }
 
-    http_proxy::http_proxy() {
+    http_proxy::http_proxy(bool print_allowed) {
+        this->print_allowed = print_allowed;
         selected = new io_operations::select_data();
         clients = new std::map<int, client_info>();
         servers = new std::map<int, server_info>();
@@ -478,19 +480,24 @@ namespace single_thread_proxy {
     }
 
     int http_proxy::read_server_response(int server_fd, io_operations::message *response_message) {
-        assert(response_message);
-        assert(servers->contains(server_fd));
         auto resource_name = servers->at(server_fd).resource_name;
-        assert(cache->contains(resource_name));
         auto resource = cache->get(resource_name);
         if (resource->status == httpparser::HttpResponseParser::ParsingCompleted) {
             return status_code::SUCCESS;
         }
         io_operations::message *full_message = response_message;
         if (resource->data != nullptr) {
-            full_message = io_operations::concat_messages(resource->data, response_message);
+            full_message = resource->data;
+            bool added = io_operations::append_message(full_message, response_message);
+            delete response_message;
+            if (!added) {
+                return status_code::FAIL;
+            }
         }
         resource->data = full_message;
+        if (resource->content_length > resource->data->len) {
+            return status_code::SUCCESS;
+        }
         httpparser::Response response;
         httpparser::HttpResponseParser parser;
         httpparser::HttpResponseParser::ParseResult res = parser.parse(response, full_message->data,
@@ -500,7 +507,17 @@ namespace single_thread_proxy {
             return status_code::FAIL;
         }
         if (res == httpparser::HttpResponseParser::ParsingIncompleted) {
-            log("Response of " + resource_name + " is not complete, it's current length: " + std::to_string(full_message->len));
+            auto content_length_header = std::find_if(response.headers.begin(), response.headers.end(),
+                                                      [&](const httpparser::Response::HeaderItem& item){
+                                                          return item.name == "Content-Length";
+            });
+            if (content_length_header != response.headers.end()) {
+                size_t content_length = std::stoul(content_length_header->value);
+                resource->content_length = content_length;
+                log("Content-Length = " + content_length_header->value);
+            }
+            log("Response of " + resource_name + " is not complete, it's current length: " +
+            std::to_string(full_message->len));
             assert(resource->status == httpparser::HttpResponseParser::ParsingIncompleted);
             return status_code::SUCCESS;
         }

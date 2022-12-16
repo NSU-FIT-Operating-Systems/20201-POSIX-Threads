@@ -8,11 +8,12 @@
 namespace io_operations {
     static const int READ_PIPE_END = 0;
     static const int WRITE_PIPE_END = 1;
-    static const int MSG_LENGTH_LIMIT = 4 * 1024;
+    static const int MSG_LENGTH_LIMIT = 32 * 1024;
 
     typedef struct message {
         const char *data;
         size_t len;
+        size_t capacity;
 
         message() = default;
 
@@ -23,7 +24,7 @@ namespace io_operations {
 
     size_t message_size(const message *message);
 
-    message *concat_messages(message *a, message *b);
+    bool append_message(message *a, message *b);
 
     bool write_all(int fd, message *message);
 
