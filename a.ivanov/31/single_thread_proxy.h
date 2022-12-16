@@ -5,9 +5,11 @@
 #include <map>
 #include <vector>
 #include <set>
+
 #include "proxy.h"
 #include "select_data.h"
 #include "io_operations.h"
+#include "map_cache.h"
 
 #include "httpparser/src/httpparser/httpresponseparser.h"
 #include "httpparser/src/httpparser/response.h"
@@ -49,8 +51,6 @@ namespace single_thread_proxy {
 
     class http_proxy final : public proxy {
     public:
-        static const int MAX_CLIENTS_COUNT = 500;
-        static const int MAX_WAIT_TIME_SECS = 10 * 60;
 
         http_proxy();
 
@@ -66,13 +66,13 @@ namespace single_thread_proxy {
 
         int accept_new_client();
 
-        int handle_read_message(int fd);
+        int read_message_from(int fd);
 
-        int handle_client_request(int client_fd, io_operations::message *request_message);
+        int read_client_request(int client_fd, io_operations::message *request_message);
 
-        int handle_server_response(int server_fd, io_operations::message *response_message);
+        int read_server_response(int server_fd, io_operations::message *response_message);
 
-        int handle_write_message(int fd);
+        int write_message_to(int fd);
 
         int begin_connect_to_remote(const std::string &hostname, int port);
 
@@ -87,7 +87,8 @@ namespace single_thread_proxy {
         io_operations::select_data *selected;
         std::map<int, client_info> *clients;
         std::map<int, server_info> *servers;
-        std::map<std::string, resource_info> *resources;
+        aiwannafly::cache<resource_info> *resource_cache;
+        std::map<std::string, struct hostent *> *DNS_map;
     };
 }
 

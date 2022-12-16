@@ -16,11 +16,6 @@ namespace io_operations {
 
         message() = default;
 
-        message(const std::string& s) {
-            data = s.data();
-            len = s.length();
-        }
-
         ~message() {
             free((void *) data);
         }
