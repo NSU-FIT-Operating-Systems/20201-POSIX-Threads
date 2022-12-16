@@ -13,10 +13,7 @@
 
 #include "single_thread_proxy.h"
 #include "status_code.h"
-#include "io_operations.h"
 #include "socket_operations.h"
-
-#include "map_cache.h"
 
 #define TERMINATE_CMD "stop"
 
@@ -96,12 +93,12 @@ namespace single_thread_proxy {
             if (ret_val == status_code::FAIL || ret_val == status_code::TIMEOUT) {
                 if (errno != EINTR && ret_val == status_code::FAIL) {
                     log_error_with_errno("Error in select");
-                    close_all_connections();
+                    free_resources();
                     return;
                 }
                 if (ret_val == status_code::TIMEOUT) {
                     log("Select timed out. End program.");
-                    close_all_connections();
+                    free_resources();
                     return;
                 }
             }
@@ -120,7 +117,7 @@ namespace single_thread_proxy {
                         log("Handle new message");
                         ret_val = read_message_from(fd);
                         if (ret_val == status_code::TERMINATE) {
-                            close_all_connections();
+                            free_resources();
                             return;
                         }
                     }
@@ -143,8 +140,13 @@ namespace single_thread_proxy {
         }
     }
 
-    void http_proxy::close_all_connections() {
+    void http_proxy::free_resources() {
         log("Shutdown...");
+        log("Free cache of " + std::to_string(cache_size_bytes()) + " bytes");
+        cache->clear();
+        for (auto it = clients->begin(); it != clients->end(); it++) {
+
+        }
         for (int fd = 3; fd <= selected->get_max_fd(); ++fd) {
             if (FD_ISSET(fd, selected->get_read_set()) ||
                 FD_ISSET(fd, selected->get_write_set())) {
@@ -160,7 +162,7 @@ namespace single_thread_proxy {
         selected = new io_operations::select_data();
         clients = new std::map<int, client_info>();
         servers = new std::map<int, server_info>();
-        resource_cache = new aiwannafly::map_cache<resource_info>();
+        cache = new aiwannafly::map_cache<resource_info>();
         DNS_map = new std::map<std::string, struct hostent *>();
     }
 
@@ -168,7 +170,7 @@ namespace single_thread_proxy {
         delete selected;
         delete clients;
         delete servers;
-        delete resource_cache;
+        delete cache;
         delete DNS_map;
     }
 
@@ -210,6 +212,11 @@ namespace single_thread_proxy {
     int http_proxy::close_connection(int fd) {
         assert(fd > 0);
         servers->erase(fd);
+        if (servers->contains(fd)) {
+            for (const auto& msg : servers->at(fd).message_queue) {
+                delete msg;
+            }
+        }
         clients->erase(fd);
         selected->remove_fd(fd, io_operations::select_data::READ);
         selected->remove_fd(fd, io_operations::select_data::WRITE);
@@ -311,9 +318,13 @@ namespace single_thread_proxy {
             assert(!servers->contains(fd));
             size_t msg_count = clients->at(fd).message_queue.size();
             if (msg_count >= 1) {
-                io_operations::message *message = clients->at(fd).message_queue.at(msg_count - 1);
+                std::pair<std::string, io_operations::message *> pair;
+                pair = clients->at(fd).message_queue.at(msg_count - 1);
                 clients->at(fd).message_queue.pop_back();
-                bool written = io_operations::write_all(fd, message);
+                bool written = io_operations::write_all(fd, pair.second);
+                if (!cache->contains(pair.first)) {
+                    delete pair.second;
+                }
                 if (msg_count - 1 > 0) {
                     selected->add_fd(fd, io_operations::select_data::WRITE);
                 }
@@ -415,14 +426,14 @@ namespace single_thread_proxy {
         if (request.method != "GET") {
             return status_code::FAIL;
         }
-        if (resource_cache->contains(resource_name)) {
+        if (cache->contains(resource_name)) {
             // we've already tried to get the resource
             log("Found " + resource_name + " in cache");
-            resource_info *resource = resource_cache->get(resource_name);
+            resource_info *resource = cache->get(resource_name);
             if (resource->status == httpparser::HttpResponseParser::ParsingCompleted) {
                 log("It is completed");
                 assert(resource->data);
-                clients->at(client_fd).message_queue.push_back(resource->data);
+                clients->at(client_fd).message_queue.emplace_back(resource_name, resource->data);
                 selected->add_fd(client_fd, io_operations::select_data::WRITE);
                 return status_code::SUCCESS;
             } else if (resource->status == httpparser::HttpResponseParser::ParsingIncompleted) {
@@ -443,10 +454,10 @@ namespace single_thread_proxy {
                 int sd = ret_val;
                 assert(servers->contains(sd));
                 servers->at(sd).message_queue.push_back(request_message);
-                if (!resource_cache->contains(resource_name)) {
-                    resource_cache->put(resource_name, new resource_info());
+                if (!cache->contains(resource_name)) {
+                    cache->put(resource_name, new resource_info());
                 }
-                resource_cache->get(resource_name)->subscribers.insert(client_fd);
+                cache->get(resource_name)->subscribers.insert(client_fd);
                 servers->at(sd).resource_name = resource_name;
                 log(std::string("Started connecting to " + header.value));
                 return ret_val;
@@ -456,12 +467,22 @@ namespace single_thread_proxy {
         return status_code::FAIL;
     }
 
+    size_t http_proxy::cache_size_bytes() {
+        return cache->size_bytes([](const resource_info *r) -> size_t {
+            size_t base = sizeof(r->subscribers) + sizeof(r->status);
+            if (r->data == nullptr) {
+                return base;
+            }
+            return base + io_operations::message_size(r->data);
+        });
+    }
+
     int http_proxy::read_server_response(int server_fd, io_operations::message *response_message) {
         assert(response_message);
         assert(servers->contains(server_fd));
         auto resource_name = servers->at(server_fd).resource_name;
-        assert(resource_cache->contains(resource_name));
-        auto resource = resource_cache->get(resource_name);
+        assert(cache->contains(resource_name));
+        auto resource = cache->get(resource_name);
         if (resource->status == httpparser::HttpResponseParser::ParsingCompleted) {
             return status_code::SUCCESS;
         }
@@ -490,13 +511,17 @@ namespace single_thread_proxy {
                 continue;
             }
             selected->add_fd(client_fd, io_operations::select_data::WRITE);
-            clients->at(client_fd).message_queue.push_back(full_message);
+            clients->at(client_fd).message_queue.emplace_back(resource_name, full_message);
         }
         resource->subscribers.clear();
         if (response.statusCode != 200) {
-            log("Bad status code, delete " + resource_name + " from cache");
-            resource_cache->erase(resource_name);
+            log("Bad status code, not store " + resource_name + " in cache");
+            cache->get(resource_name)->free_message = false;
+            delete cache->get(resource_name);
+            cache->erase(resource_name);
         }
+        std::function<size_t(const io_operations::message*)> f = io_operations::message_size;
+        log("Cache size: " + std::to_string(cache_size_bytes()));
         return status_code::SUCCESS;
     }
 }

@@ -19,7 +19,6 @@ namespace socket_operations {
         int option_value;
         int return_value = ioctl(serv_socket, FIONBIO, (char *) &option_value); // Set socket to be nonblocking
         if (return_value == status_code::FAIL) {
-            perror("=== Error in ioctl");
             return status_code::FAIL;
         }
         return status_code::SUCCESS;
@@ -30,8 +29,6 @@ namespace socket_operations {
         int return_value = setsockopt(serv_socket, SOL_SOCKET, SO_REUSEADDR, // Allow socket descriptor to be reuseable
                                       (char *) &option_value, sizeof(option_value));
         if (return_value == status_code::FAIL) {
-            perror("=== Error in setsockopt");
-            return_value = close(serv_socket);
             return status_code::FAIL;
         }
         return status_code::SUCCESS;

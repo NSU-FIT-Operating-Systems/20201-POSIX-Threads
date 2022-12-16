@@ -23,26 +23,29 @@ namespace single_thread_proxy {
     typedef struct resource_info {
         httpparser::HttpResponseParser::ParseResult status = httpparser::HttpResponseParser::ParsingIncompleted;
         io_operations::message *data = nullptr;
+        bool free_message = true;
         // vector of socket descriptors of clients who wait for the resource
         std::set<int> subscribers = std::set<int>();
 
         resource_info() = default;
 
-        ~resource_info() = default;
+        ~resource_info() {
+            if (free_message) delete data;
+        }
     } resource_info;
 
     typedef struct server_info {
-        std::vector<io_operations::message *> message_queue = std::vector<io_operations::message *>();
+        std::vector<io_operations::message *> message_queue = std::vector<io_operations::message*>();
         server_status status = NOT_CONNECTED;
         std::string resource_name;
 
         server_info() = default;
-
         ~server_info() = default;
     } server_info;
 
     typedef struct client_info {
-        std::vector<io_operations::message *> message_queue = std::vector<io_operations::message *>();
+        std::vector<std::pair<std::string, io_operations::message *>> message_queue
+                = std::vector<std::pair<std::string, io_operations::message *>>();
 
         client_info() = default;
 
@@ -80,14 +83,16 @@ namespace single_thread_proxy {
 
         int close_connection(int fd);
 
-        void close_all_connections();
+        void free_resources();
+
+        size_t cache_size_bytes();
 
         bool is_running = false;
         int proxy_socket = 0;
         io_operations::select_data *selected;
         std::map<int, client_info> *clients;
         std::map<int, server_info> *servers;
-        aiwannafly::cache<resource_info> *resource_cache;
+        aiwannafly::cache<resource_info> *cache;
         std::map<std::string, struct hostent *> *DNS_map;
     };
 }

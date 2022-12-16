@@ -39,7 +39,7 @@ namespace aiwannafly {
             return table->size();
         }
 
-        size_t size_bytes(std::function<size_t(T *)> size) {
+        size_t size_bytes(std::function<size_t(const T *)> size) {
             size_t total_size = 0;
             for (auto it = table->begin(); it != table->end(); it++) {
                 total_size += size(it->second);
@@ -48,8 +48,10 @@ namespace aiwannafly {
         }
 
         void clear() {
-            delete table;
-            this->table = new std::map<std::string, T*>();
+            for (auto it = table->begin(); it != table->end(); it++) {
+                delete it->second;
+            }
+            table->clear();
         }
 
     private:

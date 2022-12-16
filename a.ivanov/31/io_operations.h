@@ -21,6 +21,8 @@ namespace io_operations {
         }
     } message;
 
+    size_t message_size(const message *message);
+
     message *concat_messages(message *a, message *b);
 
     bool write_all(int fd, message *message);

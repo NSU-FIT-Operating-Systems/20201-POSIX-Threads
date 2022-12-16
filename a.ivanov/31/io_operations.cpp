@@ -12,6 +12,10 @@
 namespace io_operations {
     static const int DEFAULT_BUFFER_SIZE = 128;
 
+    size_t message_size(const message *message) {
+        return message->len + 1 + 8;
+    }
+
     message *concat_messages(message *a, message *b) {
         assert(a);
         assert(b);
