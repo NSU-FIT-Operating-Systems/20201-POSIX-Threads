@@ -146,7 +146,7 @@ namespace single_thread_proxy {
         selected = new io_operations::select_data();
         clients = new std::map<int, client_info>();
         servers = new std::map<int, server_info>();
-        resources = new std::map<std::string, int>();
+        resources = new std::map<std::string, resource_info>();
     }
 
     http_proxy::~http_proxy() {
@@ -383,16 +383,17 @@ namespace single_thread_proxy {
         log(request.method);
         log(request.uri);
         log(std::string("HTTP Version is 1." + std::to_string(request.versionMinor)));
-        if (resources->contains(request.uri)) {
+        std::string resource_name = request.uri;
+        if (resources->contains(resource_name)) {
             // we've already tried to get the resource
-            resource_info resource = servers->at(resources->at(request.uri)).resource;
+            resource_info resource = resources->at(resource_name);
             if (resource.status == httpparser::HttpResponseParser::ParsingCompleted) {
                 assert(resource.data);
                 clients->at(client_fd).message_queue.push_back(resource.data);
                 selected->add_fd(client_fd, io_operations::select_data::WRITE);
                 return status_code::SUCCESS;
             } else if (resource.status == httpparser::HttpResponseParser::ParsingIncompleted) {
-                servers->at(resources->at(request.uri)).resource.subscribers.insert(client_fd);
+                resources->at(resource_name).subscribers.insert(client_fd);
                 return status_code::SUCCESS;
             }
             return status_code::FAIL;
@@ -407,9 +408,10 @@ namespace single_thread_proxy {
                 }
                 int sd = ret_val;
                 assert(servers->contains(sd));
-                (*resources)[request.uri] = sd;
+                (*resources)[resource_name] = resource_info();
+                resources->at(resource_name).subscribers.insert(client_fd);
                 servers->at(sd).message_queue.push_back(request_message);
-                servers->at(sd).resource.subscribers.insert(client_fd);
+                servers->at(sd).resource_name = resource_name;
                 log(std::string("Started connecting to " + header.value));
                 return ret_val;
             }
@@ -421,7 +423,8 @@ namespace single_thread_proxy {
     int http_proxy::handle_server_response(int server_fd, io_operations::message *response_message) {
         assert(response_message);
         assert(servers->contains(server_fd));
-        auto resource = servers->at(server_fd).resource;
+        auto resource_name = servers->at(server_fd).resource_name;
+        auto resource = resources->at(resource_name);
         if (resource.status == httpparser::HttpResponseParser::ParsingCompleted) {
             return status_code::SUCCESS;
         }
@@ -429,7 +432,7 @@ namespace single_thread_proxy {
         if (resource.data != nullptr) {
             full_message = io_operations::concat_messages(resource.data, response_message);
         }
-        servers->at(server_fd).resource.data = full_message;
+        resources->at(resource_name).data = full_message;
         httpparser::Response response;
         httpparser::HttpResponseParser parser;
         httpparser::HttpResponseParser::ParseResult res = parser.parse(response, full_message->data,

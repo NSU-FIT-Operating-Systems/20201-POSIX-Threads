@@ -32,7 +32,7 @@ namespace single_thread_proxy {
     typedef struct server_info {
         std::vector<io_operations::message *> message_queue = std::vector<io_operations::message *>();
         server_status status = NOT_CONNECTED;
-        resource_info resource = resource_info();
+        std::string resource_name;
 
         server_info() = default;
 
@@ -92,7 +92,7 @@ namespace single_thread_proxy {
         io_operations::select_data *selected;
         std::map<int, client_info> *clients;
         std::map<int, server_info> *servers;
-        std::map<std::string, int> *resources;
+        std::map<std::string, resource_info> *resources;
     };
 }
 
