@@ -145,8 +145,10 @@ namespace single_thread_proxy {
         log("Shutdown...");
         log("Free cache of " + std::to_string(cache_size_bytes()) + " bytes");
         cache->clear();
-        for (auto it = clients->begin(); it != clients->end(); it++) {
-
+        for (auto & client : *clients) {
+            for (const auto& msg : client.second.message_queue) {
+                delete msg.second;
+            }
         }
         for (int fd = 3; fd <= selected->get_max_fd(); ++fd) {
             if (FD_ISSET(fd, selected->get_read_set()) ||
@@ -432,14 +434,14 @@ namespace single_thread_proxy {
             // we've already tried to get the resource
             log("Found " + resource_name + " in cache");
             resource_info *resource = cache->get(resource_name);
-            if (resource->status == httpparser::HttpResponseParser::ParsingCompleted) {
+            if (resource->status == httpparser::HttpResponseParser::ParsingCompleted ||
+                    resource->status == httpparser::HttpResponseParser::ParsingIncompleted) {
                 log("It is completed");
-                assert(resource->data);
-                clients->at(client_fd).message_queue.emplace_back(resource_name, resource->data);
+                assert(!resource->parts.empty());
+                for (auto msg : resource->parts) {
+                    clients->at(client_fd).message_queue.emplace_back(resource_name, msg);
+                }
                 selected->add_fd(client_fd, io_operations::select_data::WRITE);
-                return status_code::SUCCESS;
-            } else if (resource->status == httpparser::HttpResponseParser::ParsingIncompleted) {
-                log("It is not completed");
                 resource->subscribers.insert(client_fd);
                 return status_code::SUCCESS;
             }
@@ -471,31 +473,50 @@ namespace single_thread_proxy {
 
     size_t http_proxy::cache_size_bytes() {
         return cache->size_bytes([](const resource_info *r) -> size_t {
-            size_t base = sizeof(r->subscribers) + sizeof(r->status);
-            if (r->data == nullptr) {
-                return base;
+            size_t total_size = sizeof(r->subscribers) + sizeof(r->status);
+            for (auto msg : r->parts) {
+                total_size += io_operations::message_size(msg);
             }
-            return base + io_operations::message_size(r->data);
+            return total_size;
         });
     }
 
-    int http_proxy::read_server_response(int server_fd, io_operations::message *response_message) {
+    void http_proxy::send_resource_part(const std::string &resource_name, resource_info *resource) {
+        if (resource->parts.empty()) return;
+        io_operations::message *full_message = resource->parts.back();
+        for (int client_fd: resource->subscribers) {
+            if (!clients->contains(client_fd)) {
+                continue;
+            }
+            selected->add_fd(client_fd, io_operations::select_data::WRITE);
+            clients->at(client_fd).message_queue.emplace_back(resource_name, full_message);
+        }
+    }
+
+    int http_proxy::read_server_response(int server_fd, io_operations::message *new_part) {
         auto resource_name = servers->at(server_fd).resource_name;
         auto resource = cache->get(resource_name);
         if (resource->status == httpparser::HttpResponseParser::ParsingCompleted) {
             return status_code::SUCCESS;
         }
-        io_operations::message *full_message = response_message;
+        io_operations::message *full_message = new_part;
         if (resource->data != nullptr) {
             full_message = resource->data;
-            bool added = io_operations::append_message(full_message, response_message);
-            delete response_message;
+            bool added = io_operations::append_message(resource->data, new_part);
             if (!added) {
                 return status_code::FAIL;
             }
         }
         resource->data = full_message;
-        if (resource->content_length > resource->data->len) {
+        resource->parts.push_back(new_part);
+        resource->current_length += new_part->len;
+        if (resource->content_length >= resource->current_length) {
+            // send the current part to clients
+            send_resource_part(resource_name, resource);
+            if (resource->content_length == resource->current_length) {
+                resource->status = httpparser::HttpResponseParser::ParsingCompleted;
+                log("Cache size: " + std::to_string(cache_size_bytes()));
+            }
             return status_code::SUCCESS;
         }
         httpparser::Response response;
@@ -503,7 +524,7 @@ namespace single_thread_proxy {
         httpparser::HttpResponseParser::ParseResult res = parser.parse(response, full_message->data,
                                                                        full_message->data + full_message->len);
         if (res == httpparser::HttpResponseParser::ParsingError) {
-            log_error("Failed to parse response of" + resource_name);
+            log_error("Failed to parse response of " + resource_name);
             return status_code::FAIL;
         }
         if (res == httpparser::HttpResponseParser::ParsingIncompleted) {
@@ -514,30 +535,25 @@ namespace single_thread_proxy {
             if (content_length_header != response.headers.end()) {
                 size_t content_length = std::stoul(content_length_header->value);
                 resource->content_length = content_length;
-                log("Content-Length = " + content_length_header->value);
+                assert(response.content.size() < full_message->len);
+                resource->content_length += (full_message->len - response.content.size());
+                log("Content-Length : " + content_length_header->value);
             }
             log("Response of " + resource_name + " is not complete, it's current length: " +
             std::to_string(full_message->len));
             assert(resource->status == httpparser::HttpResponseParser::ParsingIncompleted);
+            send_resource_part(resource_name, resource);
             return status_code::SUCCESS;
         }
         log("Parsed response of " + resource_name + std::string(" code: ") + std::to_string(response.statusCode));
         resource->status = httpparser::HttpResponseParser::ParsingCompleted;
-        for (int client_fd: resource->subscribers) {
-            if (!clients->contains(client_fd)) {
-                continue;
-            }
-            selected->add_fd(client_fd, io_operations::select_data::WRITE);
-            clients->at(client_fd).message_queue.emplace_back(resource_name, full_message);
-        }
-        resource->subscribers.clear();
+        send_resource_part(resource_name, resource);
         if (response.statusCode != 200) {
             log("Bad status code, not store " + resource_name + " in cache");
             cache->get(resource_name)->free_message = false;
             delete cache->get(resource_name);
             cache->erase(resource_name);
         }
-        std::function<size_t(const io_operations::message*)> f = io_operations::message_size;
         log("Cache size: " + std::to_string(cache_size_bytes()));
         return status_code::SUCCESS;
     }

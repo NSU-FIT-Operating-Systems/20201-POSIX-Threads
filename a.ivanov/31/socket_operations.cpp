@@ -3,7 +3,6 @@
 #include "status_code.h"
 #include <arpa/inet.h>
 #include <fcntl.h>
-#include <stdio.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
 

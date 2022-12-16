@@ -22,7 +22,9 @@ namespace single_thread_proxy {
 
     typedef struct resource_info {
         httpparser::HttpResponseParser::ParseResult status = httpparser::HttpResponseParser::ParsingIncompleted;
-        io_operations::message *data = nullptr;
+        std::vector<io_operations::message*> parts = std::vector<io_operations::message*>();
+        io_operations::message* data = nullptr;
+        size_t current_length = 0;
         size_t content_length = 0;
         bool free_message = true;
         // vector of socket descriptors of clients who wait for the resource
@@ -31,7 +33,16 @@ namespace single_thread_proxy {
         resource_info() = default;
 
         ~resource_info() {
-            if (free_message) delete data;
+            if (free_message) {
+                delete data;
+                int count = 0;
+                for (auto msg : parts) {
+                    if (count > 0) {
+                        delete msg;
+                    }
+                    count++;
+                }
+            }
         }
     } resource_info;
 
@@ -79,13 +90,15 @@ namespace single_thread_proxy {
 
         int read_client_request(int client_fd, io_operations::message *request_message);
 
-        int read_server_response(int server_fd, io_operations::message *response_message);
+        int read_server_response(int server_fd, io_operations::message *new_part);
 
         int write_message_to(int fd);
 
         int begin_connect_to_remote(const std::string &hostname, int port);
 
         int finish_connect_to_remote(int fd);
+
+        void send_resource_part(const std::string &resource_name, resource_info *resource);
 
         int close_connection(int fd);
 
