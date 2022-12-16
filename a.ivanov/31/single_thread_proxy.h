@@ -61,11 +61,6 @@ namespace single_thread_proxy {
         void shutdown() final;
 
     private:
-        static void log(const std::string &msg);
-
-        static void log_error(const std::string &msg);
-
-        static void log_error_with_errno(const std::string &msg);
 
         int init_and_bind_proxy_socket(int port);
 

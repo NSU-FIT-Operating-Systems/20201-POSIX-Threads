@@ -39,15 +39,15 @@ namespace single_thread_proxy {
         return status_code::SUCCESS;
     }
 
-    void http_proxy::log(const std::string &msg) {
+    void log(const std::string &msg) {
         std::cout << "[PROXY] " << msg << std::endl;
     }
 
-    void http_proxy::log_error(const std::string &msg) {
+    void log_error(const std::string &msg) {
         std::cerr << "[PROXY] " << msg << std::endl;
     }
 
-    void http_proxy::log_error_with_errno(const std::string &msg) {
+    void log_error_with_errno(const std::string &msg) {
         perror(msg.data());
     }
 
@@ -134,9 +134,9 @@ namespace single_thread_proxy {
         for (int fd = 0; fd <= selected->get_max_fd(); ++fd) {
             if (FD_ISSET(fd, selected->get_read_set()) ||
                 FD_ISSET(fd, selected->get_write_set())) {
-                int ret_val = close(fd);
+                int ret_val = close_connection(fd);
                 if (ret_val == status_code::FAIL) {
-                    log_error_with_errno("Error in close");
+                    log_error_with_errno("Error in close_connection");
                 }
             }
         }
@@ -291,7 +291,6 @@ namespace single_thread_proxy {
                 io_operations::message *message = clients->at(fd).message_queue.at(msg_count - 1);
                 clients->at(fd).message_queue.pop_back();
                 bool written = io_operations::write_all(fd, message);
-                delete message;
                 if (!written) {
                     log_error_with_errno("Error in write all");
                 } else {
@@ -386,13 +385,16 @@ namespace single_thread_proxy {
         std::string resource_name = request.uri;
         if (resources->contains(resource_name)) {
             // we've already tried to get the resource
+            log("Resource found in cache");
             resource_info resource = resources->at(resource_name);
             if (resource.status == httpparser::HttpResponseParser::ParsingCompleted) {
+                log("It is completed");
                 assert(resource.data);
                 clients->at(client_fd).message_queue.push_back(resource.data);
                 selected->add_fd(client_fd, io_operations::select_data::WRITE);
                 return status_code::SUCCESS;
             } else if (resource.status == httpparser::HttpResponseParser::ParsingIncompleted) {
+                log("It is uncompleted");
                 resources->at(resource_name).subscribers.insert(client_fd);
                 return status_code::SUCCESS;
             }
@@ -445,11 +447,13 @@ namespace single_thread_proxy {
             assert(resource.status == httpparser::HttpResponseParser::ParsingIncompleted);
             return status_code::SUCCESS;
         }
+        log("Successfully parsed response");
+        resources->at(resource_name).status = httpparser::HttpResponseParser::ParsingCompleted;
         for (int client_fd : resource.subscribers) {
             selected->add_fd(client_fd, io_operations::select_data::WRITE);
             clients->at(client_fd).message_queue.push_back(full_message);
         }
-        resource.subscribers.clear();
+        resources->at(resource_name).subscribers.clear();
         return status_code::SUCCESS;
     }
 }

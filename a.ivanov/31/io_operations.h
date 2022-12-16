@@ -8,7 +8,7 @@
 namespace io_operations {
     static const int READ_PIPE_END = 0;
     static const int WRITE_PIPE_END = 1;
-    static const int MSG_LENGTH_LIMIT = 32 * 1024;
+    static const int MSG_LENGTH_LIMIT = 4 * 1024;
 
     typedef struct message {
         const char *data;
