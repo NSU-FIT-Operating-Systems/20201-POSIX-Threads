@@ -16,6 +16,16 @@ namespace io_operations {
         return message->len + 1 + 8;
     }
 
+    message *copy(message *prev) {
+        assert(prev);
+        auto *res = new message;
+        res->len = prev->len;
+        res->capacity = prev->capacity;
+        res->data = (char *) malloc(res->capacity);
+        memcpy((void *) res->data, prev->data, res->len);
+        return res;
+    }
+
     bool append_message(message *a, message *b) {
         assert(a);
         assert(b);

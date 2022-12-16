@@ -500,14 +500,15 @@ namespace single_thread_proxy {
             return status_code::SUCCESS;
         }
         io_operations::message *full_message = new_part;
-        if (resource->data != nullptr) {
-            full_message = resource->data;
-            bool added = io_operations::append_message(resource->data, new_part);
+        if (resource->full_data != nullptr) {
+            full_message = resource->full_data;
+            bool added = io_operations::append_message(resource->full_data, new_part);
             if (!added) {
                 return status_code::FAIL;
             }
+        } else {
+            resource->full_data = io_operations::copy(new_part);
         }
-        resource->data = full_message;
         resource->parts.push_back(new_part);
         resource->current_length += new_part->len;
         if (resource->content_length >= resource->current_length) {

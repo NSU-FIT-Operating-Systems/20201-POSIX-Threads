@@ -22,6 +22,8 @@ namespace io_operations {
         }
     } message;
 
+    message *copy(message *prev);
+
     size_t message_size(const message *message);
 
     bool append_message(message *a, message *b);

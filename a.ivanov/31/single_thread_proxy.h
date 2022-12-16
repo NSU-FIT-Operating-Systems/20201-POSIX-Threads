@@ -22,8 +22,8 @@ namespace single_thread_proxy {
 
     typedef struct resource_info {
         httpparser::HttpResponseParser::ParseResult status = httpparser::HttpResponseParser::ParsingIncompleted;
-        std::vector<io_operations::message*> parts = std::vector<io_operations::message*>();
-        io_operations::message* data = nullptr;
+        std::vector<io_operations::message *> parts = std::vector<io_operations::message *>();
+        io_operations::message *full_data = nullptr;
         size_t current_length = 0;
         size_t content_length = 0;
         bool free_message = true;
@@ -33,25 +33,22 @@ namespace single_thread_proxy {
         resource_info() = default;
 
         ~resource_info() {
+            delete full_data;
             if (free_message) {
-                delete data;
-                int count = 0;
-                for (auto msg : parts) {
-                    if (count > 0) {
-                        delete msg;
-                    }
-                    count++;
+                for (auto msg: parts) {
+                    delete msg;
                 }
             }
         }
     } resource_info;
 
     typedef struct server_info {
-        std::vector<io_operations::message *> message_queue = std::vector<io_operations::message*>();
+        std::vector<io_operations::message *> message_queue = std::vector<io_operations::message *>();
         server_status status = NOT_CONNECTED;
         std::string resource_name;
 
         server_info() = default;
+
         ~server_info() = default;
     } server_info;
 
