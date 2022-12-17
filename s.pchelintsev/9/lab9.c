@@ -7,15 +7,17 @@
 #include <pthread.h>
 #include <stdbool.h>
 #include <signal.h>
+#include <unistd.h>
 
 #define BLOCK_SIZE 15000000
 
 static bool die = false;
 
 static void sigint_handler(int sig) {
-    signal(sig, SIG_IGN);
-    printf("Ctrl+C received, aborting ASAP...\n");
-    die = true;
+	signal(sig, SIG_IGN);
+	const char str[] = "Ctrl+C received, aborting ASAP...\n";
+	write(STDOUT_FILENO, str, sizeof(str));
+	die = true;
 }
 
 typedef struct work_t {
