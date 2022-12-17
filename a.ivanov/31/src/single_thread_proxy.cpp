@@ -523,9 +523,18 @@ namespace single_thread_proxy {
             resource->full_data = io::copy(new_part);
         }
         resource->current_length += new_part->len;
-        if (resource->content_length >= resource->current_length) {
+        if (resource->content_length > resource->current_length) {
             // send the current part to clients
             send_resource_part(res_name, resource);
+            return status_code::SUCCESS;
+        } else if (resource->content_length == resource->current_length && resource->content_length > 0) {
+            send_resource_part(res_name, resource);
+            resource->status = httpparser::HttpResponseParser::ParsingCompleted;
+            log("Full bytes length : " + std::to_string(resource->full_data->len));
+            log("Full parts count : " + std::to_string(resource->parts.size()));
+            delete resource->full_data;
+            resource->full_data = nullptr;
+            log("Cache size: " + std::to_string(cache_size_bytes()));
             return status_code::SUCCESS;
         }
         httpparser::Response response;
@@ -546,6 +555,11 @@ namespace single_thread_proxy {
                 size_t content_length = std::stoul(content_length_header->value);
                 resource->content_length = content_length;
                 log("Content-Length : " + content_length_header->value);
+                int sub = full_msg->len - response.content.size();
+                if (sub > 0) {
+                    resource->content_length += sub;
+                }
+                log("Diff : " + std::to_string(sub));
             }
             log("Response of " + res_name + " is not complete, it's current length: " +
                 std::to_string(full_msg->len));

@@ -10,6 +10,7 @@
 #define TEST_FILES_URL "www.ccfit.nsu.ru/~rzheutskiy/test_files"
 #define DATA_50MB_URL "www.ccfit.nsu.ru/~rzheutskiy/test_files/50mb.dat"
 #define DATA_100MB_URL "www.ccfit.nsu.ru/~rzheutskiy/test_files/100mb.dat"
+#define DATA_200MB_URL "www.ccfit.nsu.ru/~rzheutskiy/test_files/200mb.dat"
 
 namespace {
     const int REQUIRED_ARGC = 1 + 1;
@@ -65,10 +66,12 @@ namespace {
         std::string buffer;
         CURLcode code = CURLE_READ_ERROR;
         bool with_proxy = true;
+        long timeout_secs = 0;
         std::string url;
     } download_info;
 
-    void get_data(const std::string &url, bool with_proxy, std::string *buffer, CURLcode *res) {
+    void get_data(const std::string &url, bool with_proxy, std::string *buffer, CURLcode *res,
+                  long timeout_secs) {
         assert(buffer);
         assert(res);
         CURL *curl;
@@ -77,6 +80,9 @@ namespace {
         curl_easy_setopt(curl, CURLOPT_URL, url.data());
         if (with_proxy) {
             curl_easy_setopt(curl, CURLOPT_PROXY, ("http://localhost:" + std::to_string(port)).data());
+        }
+        if (timeout_secs > 0) {
+            curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout_secs);
         }
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, buffer);
@@ -89,7 +95,7 @@ namespace {
 
     void *download_start(void *arg) {
         auto *info = (struct download_info *) arg;
-        get_data(info->url, info->with_proxy, &info->buffer, &info->code);
+        get_data(info->url, info->with_proxy, &info->buffer, &info->code, info->timeout_secs);
         return nullptr;
     }
 }
@@ -97,7 +103,7 @@ namespace {
 TEST(HTTP_PROXY, BaseTest) {
     CURLcode res;
     std::string read_buffer;
-    get_data(TEST_FILES_URL, true, &read_buffer, &res);
+    get_data(TEST_FILES_URL, true, &read_buffer, &res, 0);
     EXPECT_EQ(res, CURLE_OK);
 }
 
@@ -105,24 +111,26 @@ TEST(HTTP_PROXY, SpeedIncreaseTest) {
     CURLcode res;
     std::string read_buffer1;
     auto start = std::chrono::steady_clock::now();
-    get_data(DATA_100MB_URL, true, &read_buffer1, &res);
+    get_data(DATA_100MB_URL, true, &read_buffer1, &res, 0);
     auto end = std::chrono::steady_clock::now();
     EXPECT_EQ(res, CURLE_OK);
     size_t millis_first = duration_cast<std::chrono::milliseconds>(end - start).count();
     std::string read_buffer2;
     start = std::chrono::steady_clock::now();
-    get_data(DATA_100MB_URL, true, &read_buffer2, &res);
+    get_data(DATA_100MB_URL, true, &read_buffer2, &res, 0);
     end = std::chrono::steady_clock::now();
     EXPECT_EQ(res, CURLE_OK);
     size_t millis_second = duration_cast<std::chrono::milliseconds>(end - start).count();
     EXPECT_TRUE(millis_second * 2 < millis_first);
-    log("Completed " + std::to_string(millis_first / millis_second) + " times faster");
+    if (millis_second > 1)
+        log("Completed with cache " + std::to_string(millis_first / millis_second) + " times faster");
 }
 
 TEST(HTTP_PROXY, MultipleConnectionsTest) {
     size_t conns_count = 30;
+    log("Launching " + std::to_string(conns_count) + " 50MB-download sessions through PROXY");
     ASSERT_FALSE(conns_count <= 0);
-    auto download_segments = std::vector<download_info*>();
+    auto download_segments = std::vector<download_info *>();
     for (size_t i = 0; i < conns_count; i++) {
         auto info = new download_info();
         if (i == 0) {
@@ -133,14 +141,54 @@ TEST(HTTP_PROXY, MultipleConnectionsTest) {
         int code = pthread_create(&info->tid, nullptr, download_start, info);
         ASSERT_FALSE(code < 0);
     }
-    for (const auto &info : download_segments) {
+    for (const auto &info: download_segments) {
         int code = pthread_join(info->tid, nullptr);
         ASSERT_FALSE(code < 0);
     }
     auto canonic_buffer = download_segments.front()->buffer;
-    for (const auto &info : download_segments) {
+    for (const auto &info: download_segments) {
         EXPECT_EQ(info->code, CURLE_OK);
         EXPECT_EQ(canonic_buffer, info->buffer);
+        delete info;
+    }
+}
+
+TEST(HTTP_PROXY, MultipleDisconnectionsTest) {
+    size_t conns_count = 5;
+    log("Launching " + std::to_string(conns_count) + " 200MB-download sessions "
+                                                     "through PROXY with strict time limits");
+    ASSERT_FALSE(conns_count <= 0);
+    auto download_segments = std::vector<download_info *>();
+    for (long i = 0; i < conns_count; i++) {
+        auto info = new download_info();
+        info->timeout_secs = (i + 1) * 5;
+        if (i == 0) {
+            info->with_proxy = false;
+            info->timeout_secs = 0; // get first file without proxy
+        }
+        if (i == conns_count - 1) {
+            info->timeout_secs = 0; // no timeout for the last one
+        }
+        info->url = DATA_200MB_URL;
+        download_segments.push_back(info);
+        int code = pthread_create(&info->tid, nullptr, download_start, info);
+        ASSERT_FALSE(code < 0);
+    }
+    for (const auto &info: download_segments) {
+        int code = pthread_join(info->tid, nullptr);
+        ASSERT_FALSE(code < 0);
+    }
+    auto canonic_buffer = download_segments.front()->buffer;
+    int count = 0;
+    for (const auto &info: download_segments) {
+        count++;
+        EXPECT_TRUE(info->code == CURLE_OK || info->code == CURLE_OPERATION_TIMEDOUT);
+        if (count == conns_count) {
+            EXPECT_EQ(info->code, CURLE_OK);
+        }
+        if (count == conns_count) {
+            EXPECT_EQ(canonic_buffer, info->buffer);
+        }
         delete info;
     }
 }
