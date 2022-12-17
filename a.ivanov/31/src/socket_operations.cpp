@@ -7,13 +7,6 @@
 #include <unistd.h>
 
 namespace socket_operations {
-    /*
- * When writing a server, we need to be ready to react to many kinds of event
- * which could happen next: a new connection is made, or a client sends us a
- * request, or a client drops its connection. If we make a call to, say, accept,
- * and the call blocks, then we lose our ability to respond to other events.
- * In this case you need to make a socket unblocking
- */
     int set_nonblocking(int serv_socket) {
         int option_value;
         int return_value = ioctl(serv_socket, FIONBIO, (char *) &option_value); // Set socket to be nonblocking
@@ -25,7 +18,7 @@ namespace socket_operations {
 
     int set_reusable(int serv_socket) {
         int option_value;
-        int return_value = setsockopt(serv_socket, SOL_SOCKET, SO_REUSEADDR, // Allow socket descriptor to be reuseable
+        int return_value = setsockopt(serv_socket, SOL_SOCKET, SO_REUSEADDR, // Allow socket descriptor to be reusable
                                       (char *) &option_value, sizeof(option_value));
         if (return_value == status_code::FAIL) {
             return status_code::FAIL;
@@ -33,11 +26,7 @@ namespace socket_operations {
         return status_code::SUCCESS;
     }
 
-/*
- * returns non-blocking socket descriptor
- */
-    int connect_to_address(char *serv_ipv4_address, int port,
-                           struct timeval *timeout) {
+    int connect_to_address(char *serv_ipv4_address, int port) {
         if (port < 0 || port >= 65536) {
             return status_code::FAIL;
         }
@@ -45,7 +34,7 @@ namespace socket_operations {
         if (sd == status_code::FAIL) {
             return status_code::FAIL;
         }
-        struct sockaddr_in serv_sockaddr;
+        struct sockaddr_in serv_sockaddr{};
         serv_sockaddr.sin_family = AF_INET;
         serv_sockaddr.sin_port = htons(port);
         if (inet_pton(AF_INET, serv_ipv4_address, &serv_sockaddr.sin_addr) == status_code::FAIL) {
@@ -71,7 +60,7 @@ namespace socket_operations {
         if (client_sd == status_code::FAIL) {
             return status_code::FAIL;
         }
-        struct sockaddr_in serv_sockaddr;
+        struct sockaddr_in serv_sockaddr{};
         serv_sockaddr.sin_family = AF_INET;
         serv_sockaddr.sin_port = htons(port);
         serv_sockaddr.sin_addr = addr->sin_addr;

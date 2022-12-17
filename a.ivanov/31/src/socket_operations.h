@@ -9,8 +9,7 @@ namespace socket_operations {
 
     int set_reusable(int serv_socket);
 
-    int connect_to_address(char *serv_ipv4_address, int port,
-                           struct timeval *timeout);
+    int connect_to_address(char *serv_ipv4_address, int port);
 
     int make_new_connection_sockaddr(struct sockaddr_in *addr, int port);
 }

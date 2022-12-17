@@ -59,5 +59,4 @@ namespace aiwannafly {
     };
 }
 
-
 #endif //HTTP_CPP_PROXY_MAP_CACHE_H

@@ -16,10 +16,6 @@
 
 namespace single_thread_proxy {
 
-    enum server_status {
-        NOT_CONNECTED, CONNECTED
-    };
-
     typedef struct resource_info {
         httpparser::HttpResponseParser::ParseResult status = httpparser::HttpResponseParser::ParsingIncompleted;
         std::vector<io::message *> parts = std::vector<io::message *>();
@@ -44,21 +40,18 @@ namespace single_thread_proxy {
 
     typedef struct server_info {
         std::vector<io::message *> message_queue = std::vector<io::message *>();
-        server_status status = NOT_CONNECTED;
-        std::string res_name = "nothing";
+        bool connected = false;
+        std::string res_name;
 
         server_info() = default;
-
         ~server_info() = default;
     } server_info;
 
     typedef struct client_info {
-        size_t received_bytes = 0;
-        std::string res_name = "nothing";
         std::vector<io::message *> message_queue = std::vector<io::message *>();
+        std::string res_name;
 
         client_info() = default;
-
         ~client_info() = default;
     } client_info;
 
@@ -92,11 +85,11 @@ namespace single_thread_proxy {
 
         int write_message_to(int fd);
 
-        int begin_connect_to_remote(const std::string &hostname, int port);
+        int begin_connect_to_server(const std::string &hostname, int port);
 
-        int finish_connect_to_remote(int fd);
+        int finish_connect_to_server(int fd);
 
-        void send_resource_part(const std::string &resource_name, resource_info *resource);
+        void send_last_resource_part(const std::string &resource_name, resource_info *resource);
 
         int close_connection(int fd);
 

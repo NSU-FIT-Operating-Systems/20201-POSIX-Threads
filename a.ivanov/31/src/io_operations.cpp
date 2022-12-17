@@ -44,10 +44,10 @@ namespace io {
     }
 
     bool write_all(int fd, message *message) {
-        if (NULL == message) {
+        if (nullptr == message) {
             return false;
         }
-        if (NULL == message->data) {
+        if (nullptr == message->data) {
             return false;
         }
         size_t written_bytes = 0;
@@ -66,7 +66,7 @@ namespace io {
     }
 
     bool fwrite_into_pipe(FILE *pipe_fd, char *buffer, size_t len) {
-        if (NULL == buffer || NULL == pipe_fd) {
+        if (nullptr == buffer || nullptr == pipe_fd) {
             return false;
         }
         size_t written_bytes = 0;
@@ -146,9 +146,9 @@ namespace io {
             if (offset + portion > capacity) {
                 capacity *= 2;
                 char *temp = (char *) realloc(buffer, capacity);
-                if (NULL == temp) {
+                if (nullptr == temp) {
                     free(buffer);
-                    return NULL;
+                    return nullptr;
                 }
                 buffer = temp;
             }
@@ -161,7 +161,7 @@ namespace io {
                     continue;
                 } else {
                     free(buffer);
-                    return NULL;
+                    return nullptr;
                 }
             }
             if (0 == read_bytes) {
@@ -183,16 +183,16 @@ namespace io {
             if (offset + portion > capacity) {
                 capacity *= 2;
                 char *temp = (char *) realloc(buffer, capacity);
-                if (NULL == temp) {
+                if (nullptr == temp) {
                     free(buffer);
-                    return NULL;
+                    return nullptr;
                 }
                 buffer = temp;
             }
             unsigned long read_bytes = fread(buffer + offset, sizeof(char), portion, pipe_fp);
             if (ferror(pipe_fp)) {
                 free(buffer);
-                return NULL;
+                return nullptr;
             }
             if (0 == read_bytes) {
                 break;

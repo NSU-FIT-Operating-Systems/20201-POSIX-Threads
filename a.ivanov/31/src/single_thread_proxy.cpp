@@ -221,12 +221,6 @@ namespace single_thread_proxy {
                 delete msg;
             }
         }
-        if (clients->contains(fd)) {
-            log("Client " + std::to_string(fd) + " got " + std::to_string(clients->at(fd).received_bytes) + " bytes");
-//            for (const auto &msg: clients->at(fd).message_queue) {
-//                delete msg;
-//            }
-        }
         clients->erase(fd);
         selected->remove_fd(fd, io::select_data::READ);
         selected->remove_fd(fd, io::select_data::WRITE);
@@ -297,8 +291,8 @@ namespace single_thread_proxy {
         selected->remove_fd(fd, io::select_data::WRITE);
         if (servers->contains(fd)) {
             assert(!clients->contains(fd));
-            if (servers->at(fd).status == NOT_CONNECTED) {
-                int ret_val = finish_connect_to_remote(fd);
+            if (!servers->at(fd).connected) {
+                int ret_val = finish_connect_to_server(fd);
                 if (ret_val == status_code::FAIL) {
                     log_error_with_errno("Failed to make connection");
                 } else {
@@ -319,8 +313,6 @@ namespace single_thread_proxy {
                     if (!written) {
                         log_error_with_errno("Error in write all");
                         return status_code::FAIL;
-                    } else {
-//                        log("Sent request");
                     }
                 }
             }
@@ -330,7 +322,6 @@ namespace single_thread_proxy {
             size_t msg_count = clients->at(fd).message_queue.size();
             if (msg_count >= 1) {
                 auto msg = clients->at(fd).message_queue.front();
-                clients->at(fd).received_bytes += msg->len;
                 clients->at(fd).message_queue.erase(clients->at(fd).message_queue.begin());
                 bool written = io::write_all(fd, msg);
                 if (!cache->contains(clients->at(fd).res_name)) {
@@ -350,7 +341,7 @@ namespace single_thread_proxy {
         return status_code::SUCCESS;
     }
 
-    int http_proxy::begin_connect_to_remote(const std::string &hostname, int port) {
+    int http_proxy::begin_connect_to_server(const std::string &hostname, int port) {
         if (port < 0 || port >= 65536) {
             return status_code::FAIL;
         }
@@ -388,18 +379,18 @@ namespace single_thread_proxy {
             if (errno == EINPROGRESS) {
                 selected->add_fd(sd, io::select_data::WRITE);
                 (*servers)[sd] = server_info();
-                (*servers)[sd].status = NOT_CONNECTED;
+                (*servers)[sd].connected = false;
                 return sd;
             }
             return status_code::FAIL;
         }
         selected->add_fd(sd, io::select_data::READ);
         (*servers)[sd] = server_info();
-        (*servers)[sd].status = CONNECTED;
+        (*servers)[sd].connected = true;
         return sd;
     }
 
-    int http_proxy::finish_connect_to_remote(int fd) {
+    int http_proxy::finish_connect_to_server(int fd) {
         assert((*servers).contains(fd));
         int opt = fcntl(fd, F_GETFL, NULL);
         if (opt < 0) {
@@ -415,7 +406,7 @@ namespace single_thread_proxy {
             return status_code::FAIL;
         }
         selected->add_fd(fd, io::select_data::READ);
-        servers->at(fd).status = CONNECTED;
+        servers->at(fd).connected = true;
         return status_code::SUCCESS;
     }
 
@@ -456,7 +447,7 @@ namespace single_thread_proxy {
         for (const httpparser::Request::HeaderItem &header: request.headers) {
             log(header.name + std::string(" : ") + header.value);
             if (header.name == "Host") {
-                int ret_val = begin_connect_to_remote(header.value, HTTP_PORT);
+                int ret_val = begin_connect_to_server(header.value, HTTP_PORT);
                 if (ret_val == status_code::FAIL) {
                     log_error_with_errno("Failed to connect to remote");
                     return status_code::FAIL;
@@ -490,7 +481,7 @@ namespace single_thread_proxy {
         });
     }
 
-    void http_proxy::send_resource_part(const std::string &resource_name, resource_info *resource) {
+    void http_proxy::send_last_resource_part(const std::string &resource_name, resource_info *resource) {
         if (resource->parts.empty()) return;
         io::message *full_message = resource->parts.back();
         if (resource->parts.size() == 1) {
@@ -509,29 +500,30 @@ namespace single_thread_proxy {
 
     int http_proxy::read_server_response(int server_fd, io::message *new_part) {
         auto res_name = servers->at(server_fd).res_name;
+        if (!cache->contains(res_name)) {
+            cache->put(res_name, new resource_info);
+        }
         auto resource = cache->get(res_name);
-//        log("Got new part of response with " + std::to_string(new_part->len) + " bytes");
         resource->parts.push_back(new_part);
         io::message *full_msg = new_part;
-        if (resource->full_data != nullptr) {
-            full_msg = resource->full_data;
-            bool added = io::append_msg(resource->full_data, new_part);
-            if (!added) {
-                return status_code::FAIL;
+        if (resource->content_length == 0) {
+            if (resource->full_data != nullptr) {
+                full_msg = resource->full_data;
+                bool added = io::append_msg(resource->full_data, new_part);
+                if (!added) {
+                    return status_code::FAIL;
+                }
+            } else {
+                resource->full_data = io::copy(new_part);
             }
-        } else {
-            resource->full_data = io::copy(new_part);
         }
         resource->current_length += new_part->len;
         if (resource->content_length > resource->current_length) {
-            // send the current part to clients
-            send_resource_part(res_name, resource);
+            send_last_resource_part(res_name, resource);
             return status_code::SUCCESS;
         } else if (resource->content_length == resource->current_length && resource->content_length > 0) {
-            send_resource_part(res_name, resource);
+            send_last_resource_part(res_name, resource);
             resource->status = httpparser::HttpResponseParser::ParsingCompleted;
-            log("Full bytes length : " + std::to_string(resource->full_data->len));
-            log("Full parts count : " + std::to_string(resource->parts.size()));
             delete resource->full_data;
             resource->full_data = nullptr;
             log("Cache size: " + std::to_string(cache_size_bytes()));
@@ -545,7 +537,7 @@ namespace single_thread_proxy {
             log_error("Failed to parse response of " + res_name);
             return status_code::FAIL;
         }
-        send_resource_part(res_name, resource);
+        send_last_resource_part(res_name, resource);
         if (res == httpparser::HttpResponseParser::ParsingIncompleted) {
             auto content_length_header = std::find_if(response.headers.begin(), response.headers.end(),
                                                       [&](const httpparser::Response::HeaderItem &item) {
@@ -554,12 +546,12 @@ namespace single_thread_proxy {
             if (content_length_header != response.headers.end()) {
                 size_t content_length = std::stoul(content_length_header->value);
                 resource->content_length = content_length;
-                log("Content-Length : " + content_length_header->value);
-                int sub = full_msg->len - response.content.size();
+                assert(full_msg->len > response.content.size());
+                size_t sub = full_msg->len - response.content.size();
                 if (sub > 0) {
                     resource->content_length += sub;
                 }
-                log("Diff : " + std::to_string(sub));
+                log("Content-Length : " + std::to_string(resource->content_length));
             }
             log("Response of " + res_name + " is not complete, it's current length: " +
                 std::to_string(full_msg->len));
