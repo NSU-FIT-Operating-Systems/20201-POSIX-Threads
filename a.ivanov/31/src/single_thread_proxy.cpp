@@ -349,6 +349,10 @@ namespace single_thread_proxy {
         if (sd == status_code::FAIL) {
             return status_code::FAIL;
         }
+        int return_code = socket_operations::set_nonblocking(sd);
+        if (return_code == status_code::FAIL) {
+            return status_code::FAIL;
+        }
         struct hostent *hostnm;
         if (DNS_map->contains(hostname)) {
             hostnm = DNS_map->at(hostname);
@@ -364,16 +368,6 @@ namespace single_thread_proxy {
         serv_sockaddr.sin_family = AF_INET;
         serv_sockaddr.sin_port = htons(port);
         serv_sockaddr.sin_addr.s_addr = *((unsigned long *) hostnm->h_addr);
-        int opt = fcntl(sd, F_GETFL, NULL);
-        if (opt < 0) {
-            close(sd);
-            return status_code::FAIL;
-        }
-        int return_code = fcntl(sd, F_SETFL, opt | O_NONBLOCK);
-        if (return_code < 0) {
-            close(sd);
-            return status_code::FAIL;
-        }
         return_code = connect(sd, (const struct sockaddr *) &serv_sockaddr, sizeof(serv_sockaddr));
         if (return_code < 0) {
             if (errno == EINPROGRESS) {
@@ -473,7 +467,7 @@ namespace single_thread_proxy {
 
     size_t http_proxy::cache_size_bytes() {
         return cache->size_bytes([](const resource_info *r) -> size_t {
-            size_t total_size = sizeof(r->subscribers) + sizeof(r->status);
+            size_t total_size = 0;
             for (auto msg: r->parts) {
                 total_size += io::message_size(msg);
             }
