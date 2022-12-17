@@ -3,7 +3,7 @@
 
 #include <cstdlib>
 
-namespace io_operations {
+namespace io {
     class select_data {
     public:
         enum fd_type {

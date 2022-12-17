@@ -5,7 +5,7 @@
 #include <cstdio>
 #include <string>
 
-namespace io_operations {
+namespace io {
     static const int READ_PIPE_END = 0;
     static const int WRITE_PIPE_END = 1;
     static const int MSG_LENGTH_LIMIT = 4 * 1024;
@@ -26,7 +26,7 @@ namespace io_operations {
 
     size_t message_size(const message *message);
 
-    bool append_message(message *a, message *b);
+    bool append_msg(message *a, message *b);
 
     bool write_all(int fd, message *message);
 

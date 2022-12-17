@@ -22,19 +22,18 @@ namespace single_thread_proxy {
 
     typedef struct resource_info {
         httpparser::HttpResponseParser::ParseResult status = httpparser::HttpResponseParser::ParsingIncompleted;
-        std::vector<io_operations::message *> parts = std::vector<io_operations::message *>();
-        io_operations::message *full_data = nullptr;
+        std::vector<io::message *> parts = std::vector<io::message *>();
+        io::message *full_data = nullptr;
         size_t current_length = 0;
         size_t content_length = 0;
-        bool free_message = true;
+        bool free_messages = true;
         // vector of socket descriptors of clients who wait for the resource
         std::set<int> subscribers = std::set<int>();
 
         resource_info() = default;
 
         ~resource_info() {
-            delete full_data;
-            if (free_message) {
+            if (free_messages) {
                 for (auto msg: parts) {
                     delete msg;
                 }
@@ -43,9 +42,9 @@ namespace single_thread_proxy {
     } resource_info;
 
     typedef struct server_info {
-        std::vector<io_operations::message *> message_queue = std::vector<io_operations::message *>();
+        std::vector<io::message *> message_queue = std::vector<io::message *>();
         server_status status = NOT_CONNECTED;
-        std::string resource_name;
+        std::string res_name = "nothing";
 
         server_info() = default;
 
@@ -53,8 +52,9 @@ namespace single_thread_proxy {
     } server_info;
 
     typedef struct client_info {
-        std::vector<std::pair<std::string, io_operations::message *>> message_queue
-                = std::vector<std::pair<std::string, io_operations::message *>>();
+        size_t received_bytes = 0;
+        std::vector<std::pair<std::string, io::message *>> message_queue
+                = std::vector<std::pair<std::string, io::message *>>();
 
         client_info() = default;
 
@@ -85,9 +85,9 @@ namespace single_thread_proxy {
 
         int read_message_from(int fd);
 
-        int read_client_request(int client_fd, io_operations::message *request_message);
+        int read_client_request(int client_fd, io::message *request_message);
 
-        int read_server_response(int server_fd, io_operations::message *new_part);
+        int read_server_response(int server_fd, io::message *new_part);
 
         int write_message_to(int fd);
 
@@ -106,7 +106,7 @@ namespace single_thread_proxy {
         bool print_allowed = false;
         bool is_running = false;
         int proxy_socket = 0;
-        io_operations::select_data *selected;
+        io::select_data *selected;
         std::map<int, client_info> *clients;
         std::map<int, server_info> *servers;
         aiwannafly::cache<resource_info> *cache;

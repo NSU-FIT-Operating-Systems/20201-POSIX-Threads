@@ -9,7 +9,7 @@
 
 #include "status_code.h"
 
-namespace io_operations {
+namespace io {
     static const int DEFAULT_BUFFER_SIZE = 128;
 
     size_t message_size(const message *message) {
@@ -26,7 +26,7 @@ namespace io_operations {
         return res;
     }
 
-    bool append_message(message *a, message *b) {
+    bool append_msg(message *a, message *b) {
         assert(a);
         assert(b);
         size_t required_length = a->len + b->len + 1;
