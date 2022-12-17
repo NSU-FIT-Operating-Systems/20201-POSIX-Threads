@@ -329,9 +329,9 @@ namespace single_thread_proxy {
             assert(!servers->contains(fd));
             size_t msg_count = clients->at(fd).message_queue.size();
             if (msg_count >= 1) {
-                auto msg = clients->at(fd).message_queue.back();
+                auto msg = clients->at(fd).message_queue.front();
                 clients->at(fd).received_bytes += msg->len;
-                clients->at(fd).message_queue.pop_back();
+                clients->at(fd).message_queue.erase(clients->at(fd).message_queue.begin());
                 bool written = io::write_all(fd, msg);
                 if (!cache->contains(clients->at(fd).res_name)) {
                     delete msg;
@@ -492,9 +492,13 @@ namespace single_thread_proxy {
 
     void http_proxy::send_resource_part(const std::string &resource_name, resource_info *resource) {
         if (resource->parts.empty()) return;
-        io::message *full_message = resource->parts.front();
+        io::message *full_message = resource->parts.back();
+        if (resource->parts.size() == 1) {
+            log("Count of subscribers : " + std::to_string(resource->subscribers.size()));
+        }
         for (int client_fd: resource->subscribers) {
             if (!clients->contains(client_fd)) {
+                if (resource->parts.size() == 1) log("Don't work with the client");
                 continue;
             }
             selected->add_fd(client_fd, io::select_data::WRITE);
@@ -507,7 +511,7 @@ namespace single_thread_proxy {
         auto res_name = servers->at(server_fd).res_name;
         auto resource = cache->get(res_name);
 //        log("Got new part of response with " + std::to_string(new_part->len) + " bytes");
-        resource->parts.insert(resource->parts.begin(), new_part);
+        resource->parts.push_back(new_part);
         io::message *full_msg = new_part;
         if (resource->full_data != nullptr) {
             full_msg = resource->full_data;

@@ -8,7 +8,8 @@
 
 #define USAGE_GUIDE "usage: ./tests <proxy_port>"
 #define TEST_FILES_URL "www.ccfit.nsu.ru/~rzheutskiy/test_files"
-#define DATA_100BM_URL "www.ccfit.nsu.ru/~rzheutskiy/test_files/100mb.dat"
+#define DATA_50MB_URL "www.ccfit.nsu.ru/~rzheutskiy/test_files/50mb.dat"
+#define DATA_100MB_URL "www.ccfit.nsu.ru/~rzheutskiy/test_files/100mb.dat"
 
 namespace {
     const int REQUIRED_ARGC = 1 + 1;
@@ -100,31 +101,34 @@ TEST(HTTP_PROXY, BaseTest) {
     EXPECT_EQ(res, CURLE_OK);
 }
 
-//TEST(HTTP_PROXY, SpeedIncreaseTest) {
-//    CURLcode res;
-//    std::string read_buffer1;
-//    auto start = std::chrono::steady_clock::now();
-//    get_data(DATA_100BM_URL, true, &read_buffer1, &res);
-//    auto end = std::chrono::steady_clock::now();
-//    EXPECT_EQ(res, CURLE_OK);
-//    size_t millis_first = duration_cast<std::chrono::milliseconds>(end - start).count();
-//    std::string read_buffer2;
-//    start = std::chrono::steady_clock::now();
-//    get_data(DATA_100BM_URL, true, &read_buffer2, &res);
-//    end = std::chrono::steady_clock::now();
-//    EXPECT_EQ(res, CURLE_OK);
-//    size_t millis_second = duration_cast<std::chrono::milliseconds>(end - start).count();
-//    EXPECT_TRUE(millis_second * 2 < millis_first);
-//    log("Completed " + std::to_string(millis_first / millis_second) + " times faster");
-//}
+TEST(HTTP_PROXY, SpeedIncreaseTest) {
+    CURLcode res;
+    std::string read_buffer1;
+    auto start = std::chrono::steady_clock::now();
+    get_data(DATA_100MB_URL, true, &read_buffer1, &res);
+    auto end = std::chrono::steady_clock::now();
+    EXPECT_EQ(res, CURLE_OK);
+    size_t millis_first = duration_cast<std::chrono::milliseconds>(end - start).count();
+    std::string read_buffer2;
+    start = std::chrono::steady_clock::now();
+    get_data(DATA_100MB_URL, true, &read_buffer2, &res);
+    end = std::chrono::steady_clock::now();
+    EXPECT_EQ(res, CURLE_OK);
+    size_t millis_second = duration_cast<std::chrono::milliseconds>(end - start).count();
+    EXPECT_TRUE(millis_second * 2 < millis_first);
+    log("Completed " + std::to_string(millis_first / millis_second) + " times faster");
+}
 
 TEST(HTTP_PROXY, MultipleConnectionsTest) {
-    size_t conns_count = 5;
+    size_t conns_count = 30;
     ASSERT_FALSE(conns_count <= 0);
     auto download_segments = std::vector<download_info*>();
     for (size_t i = 0; i < conns_count; i++) {
         auto info = new download_info();
-        info->url = DATA_100BM_URL;
+        if (i == 0) {
+            info->with_proxy = false;
+        }
+        info->url = DATA_50MB_URL;
         download_segments.push_back(info);
         int code = pthread_create(&info->tid, nullptr, download_start, info);
         ASSERT_FALSE(code < 0);
@@ -133,10 +137,10 @@ TEST(HTTP_PROXY, MultipleConnectionsTest) {
         int code = pthread_join(info->tid, nullptr);
         ASSERT_FALSE(code < 0);
     }
-    size_t length = download_segments.front()->buffer.size();
+    auto canonic_buffer = download_segments.front()->buffer;
     for (const auto &info : download_segments) {
         EXPECT_EQ(info->code, CURLE_OK);
-        EXPECT_EQ(length, info->buffer.size());
+        EXPECT_EQ(canonic_buffer, info->buffer);
         delete info;
     }
 }
