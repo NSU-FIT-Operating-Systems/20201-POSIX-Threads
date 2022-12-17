@@ -33,21 +33,8 @@ void debugprint(const char *fmt, ...) {
 #endif
 }
 
-#define min(a, b) ( ((a) < (b)) ? (a) : (b) )
-#define max(a, b) ( ((a) > (b)) ? (a) : (b) )
 
-
-
-void generateRandomString(char* where, size_t max, int i) {
-	/*int times = i; // rand() % 12;
-	int cursor = 0;
-
-	for (int i = 0; i <= times; i++) {
-		snprintf(where + cursor, max - cursor, "#%d%c", i, i == times ? ' ' : '|');
-		cursor = strlen(where); // unoptimized, w/e
-	}
-
-	where[min(cursor, max)] = 0;*/
+void generateString(char* where, size_t max, int i) {
 	snprintf(where, max, "%d", i);
 }
 
@@ -69,8 +56,8 @@ void* producer(void* wrkVoid) {
 	WorkQueue* wq = work->wq;
 
 	for (int i = 0; ; i++) {
-		char str[EXAMPLE_STRING_CAP] = "BAD!";
-		generateRandomString(str, EXAMPLE_STRING_CAP, i);
+		char str[EXAMPLE_STRING_CAP] = { 0 };
+		generateString(str, EXAMPLE_STRING_CAP, i);
 
 #ifdef DEBUG
 		debugprint("\t%d write << %s\n", id, str);
