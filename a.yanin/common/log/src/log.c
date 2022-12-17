@@ -32,20 +32,18 @@ static void log_print_prefix(log_level_t level) {
     }
 }
 
-void log_printf(log_level_t level, char const *fmt, ...) {
-    va_list list;
-    va_start(list, fmt);
+void log_vprintf_impl(log_level_t level, char const *fmt, va_list args) {
     log_print_prefix(level);
-    vfprintf(stderr, fmt, list);
+    vfprintf(stderr, fmt, args);
     fputc('\n', stderr);
 }
 
-void log_write(log_level_t level, char const *str) {
+void log_write_impl(log_level_t level, char const *str) {
     log_print_prefix(level);
     fputs(str, stderr);
 }
 
-void log_vwritef(log_level_t level, char const *fmt, va_list args) {
+void log_vwritef_impl(log_level_t level, char const *fmt, va_list args) {
     log_print_prefix(level);
     vfprintf(stderr, fmt, args);
 }
