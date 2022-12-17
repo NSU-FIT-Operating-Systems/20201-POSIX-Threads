@@ -7,9 +7,9 @@
 
 #define NUMBER_OF_SEMAPHORE 2
 
-typedef struct pthreadParameters {
+typedef struct pthread_parameters {
     sem_t semaphores[NUMBER_OF_SEMAPHORE];
-}pthreadParameters;
+}pthread_parameters;
 
 int wait_semaphore(sem_t *sem) {
     if (sem == NULL){
@@ -37,7 +37,7 @@ int post_semaphore(sem_t *sem) {
     return 0;
 }
 
-void *print_messages(struct pthreadParameters *parameters, int first_sem, int second_sem, const char *message) {
+void *print_messages(struct pthread_parameters *parameters, int first_sem, int second_sem, const char *message) {
     if (NULL == message) {
         printf("What am I supposed to print?");
         pthread_exit(0);
@@ -61,7 +61,7 @@ void *second_print(void *parameters) {
 }
 
 int main() {
-    struct pthreadParameters parameters;
+    pthread_parameters parameters;
 
     int errorCode = sem_init(&parameters.semaphores[0], 0, 1);
     if (-1 == errorCode) {
