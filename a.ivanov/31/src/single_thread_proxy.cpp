@@ -223,9 +223,9 @@ namespace single_thread_proxy {
         }
         if (clients->contains(fd)) {
             log("Client " + std::to_string(fd) + " got " + std::to_string(clients->at(fd).received_bytes) + " bytes");
-            for (const auto &msg: clients->at(fd).message_queue) {
-                delete msg;
-            }
+//            for (const auto &msg: clients->at(fd).message_queue) {
+//                delete msg;
+//            }
         }
         clients->erase(fd);
         selected->remove_fd(fd, io::select_data::READ);
@@ -289,6 +289,7 @@ namespace single_thread_proxy {
         }
         selected->add_fd(new_client_fd, io::select_data::READ);
         (*clients)[new_client_fd] = client_info();
+        log("Accepted new client");
         return status_code::SUCCESS;
     }
 
@@ -332,7 +333,6 @@ namespace single_thread_proxy {
                 clients->at(fd).received_bytes += msg->len;
                 clients->at(fd).message_queue.pop_back();
                 bool written = io::write_all(fd, msg);
-                size_t len = msg->len;
                 if (!cache->contains(clients->at(fd).res_name)) {
                     delete msg;
                 }
@@ -441,17 +441,15 @@ namespace single_thread_proxy {
             // we've already tried to get the resource
             log("Found " + res_name + " in cache");
             resource_info *resource = cache->get(res_name);
-            if (resource->status == httpparser::HttpResponseParser::ParsingCompleted ||
-                resource->status == httpparser::HttpResponseParser::ParsingIncompleted) {
-                log("It's size : " + std::to_string(resource->current_length));
-                log("It's count of parts : " + std::to_string(resource->parts.size()));
-                clients->at(client_fd).res_name = res_name;
-                for (auto msg: resource->parts) {
-                    clients->at(client_fd).message_queue.push_back(msg);
-                }
+            resource->subscribers.insert(client_fd);
+            log("It's size : " + std::to_string(resource->current_length));
+            log("It's count of parts : " + std::to_string(resource->parts.size()));
+            clients->at(client_fd).res_name = res_name;
+            for (auto msg: resource->parts) {
+                clients->at(client_fd).message_queue.push_back(msg);
+            }
+            if (!clients->at(client_fd).message_queue.empty()) {
                 selected->add_fd(client_fd, io::select_data::WRITE);
-                resource->subscribers.insert(client_fd);
-                return status_code::FAIL;
             }
             return status_code::FAIL;
         }
