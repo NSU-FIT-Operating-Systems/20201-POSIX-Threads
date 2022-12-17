@@ -87,8 +87,8 @@ namespace io {
     message *read_all(int socket_fd) {
         size_t capacity = DEFAULT_BUFFER_SIZE;
         char *buffer = (char *) malloc(capacity + 1);
-        if (buffer == NULL) {
-            return NULL;
+        if (buffer == nullptr) {
+            return nullptr;
         }
         size_t offset = 0;
         size_t portion = DEFAULT_BUFFER_SIZE;
@@ -96,9 +96,9 @@ namespace io {
             if (offset + portion > capacity) {
                 capacity *= 2;
                 char *temp = (char *) realloc(buffer, capacity);
-                if (NULL == temp) {
+                if (nullptr == temp) {
                     free(buffer);
-                    return NULL;
+                    return nullptr;
                 }
                 buffer = temp;
             }

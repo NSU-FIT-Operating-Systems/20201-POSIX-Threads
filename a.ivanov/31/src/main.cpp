@@ -1,6 +1,8 @@
 #include <iostream>
+#include <string>
 
 #include "single_thread_proxy.h"
+#include "pthread.h"
 
 #define USAGE_GUIDE "usage: ./prog <proxy_port>"
 

@@ -11,8 +11,8 @@
 #include "io_operations.h"
 #include "map_cache.h"
 
-#include "httpparser/src/httpparser/httpresponseparser.h"
-#include "httpparser/src/httpparser/response.h"
+#include "../httpparser/src/httpparser/httpresponseparser.h"
+#include "../httpparser/src/httpparser/response.h"
 
 namespace single_thread_proxy {
 
@@ -33,6 +33,7 @@ namespace single_thread_proxy {
         resource_info() = default;
 
         ~resource_info() {
+            delete full_data;
             if (free_messages) {
                 for (auto msg: parts) {
                     delete msg;
@@ -53,8 +54,8 @@ namespace single_thread_proxy {
 
     typedef struct client_info {
         size_t received_bytes = 0;
-        std::vector<std::pair<std::string, io::message *>> message_queue
-                = std::vector<std::pair<std::string, io::message *>>();
+        std::string res_name = "nothing";
+        std::vector<io::message *> message_queue = std::vector<io::message *>();
 
         client_info() = default;
 

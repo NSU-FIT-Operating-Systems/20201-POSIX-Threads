@@ -8,8 +8,8 @@
 #include <fcntl.h>
 #include <cassert>
 
-#include "httpparser/src/httpparser/request.h"
-#include "httpparser/src/httpparser/httprequestparser.h"
+#include "../httpparser/src/httpparser/request.h"
+#include "../httpparser/src/httpparser/httprequestparser.h"
 
 #include "single_thread_proxy.h"
 #include "status_code.h"
@@ -145,10 +145,15 @@ namespace single_thread_proxy {
         log("Shutdown...");
         log("Free cache of " + std::to_string(cache_size_bytes()) + " bytes");
         cache->clear();
-        for (int fd = 3; fd <= selected->get_max_fd(); ++fd) {
+        int ret_val = close(proxy_socket);
+        if (ret_val == status_code::FAIL) {
+            log_error_with_errno("Error in close(proxy_socket)");
+        }
+        for (int fd = 3; fd <= selected->get_max_fd(); fd++) {
+            if (fd == proxy_socket) continue;
             if (FD_ISSET(fd, selected->get_read_set()) ||
                 FD_ISSET(fd, selected->get_write_set())) {
-                int ret_val = close_connection(fd);
+                ret_val = close_connection(fd);
                 if (ret_val == status_code::FAIL) {
                     log_error_with_errno("Error in close_connection");
                 }
@@ -219,7 +224,7 @@ namespace single_thread_proxy {
         if (clients->contains(fd)) {
             log("Client " + std::to_string(fd) + " got " + std::to_string(clients->at(fd).received_bytes) + " bytes");
             for (const auto &msg: clients->at(fd).message_queue) {
-                delete msg.second;
+                delete msg;
             }
         }
         clients->erase(fd);
@@ -314,7 +319,7 @@ namespace single_thread_proxy {
                         log_error_with_errno("Error in write all");
                         return status_code::FAIL;
                     } else {
-                        log("Sent request");
+//                        log("Sent request");
                     }
                 }
             }
@@ -323,13 +328,13 @@ namespace single_thread_proxy {
             assert(!servers->contains(fd));
             size_t msg_count = clients->at(fd).message_queue.size();
             if (msg_count >= 1) {
-                std::pair<std::string, io::message *> pair;
-                pair = clients->at(fd).message_queue.back();
-                clients->at(fd).received_bytes += pair.second->len;
+                auto msg = clients->at(fd).message_queue.back();
+                clients->at(fd).received_bytes += msg->len;
                 clients->at(fd).message_queue.pop_back();
-                bool written = io::write_all(fd, pair.second);
-                if (!cache->contains(pair.first)) {
-                    delete pair.second;
+                bool written = io::write_all(fd, msg);
+                size_t len = msg->len;
+                if (!cache->contains(clients->at(fd).res_name)) {
+                    delete msg;
                 }
                 if (msg_count - 1 > 0) {
                     selected->add_fd(fd, io::select_data::WRITE);
@@ -338,7 +343,7 @@ namespace single_thread_proxy {
                     log_error_with_errno("Error in write all");
                     return status_code::FAIL;
                 } else {
-                    log("Sent response to client");
+//                    log("Sent to client " + std::to_string(len) + " bytes");
                 }
             }
         }
@@ -440,12 +445,13 @@ namespace single_thread_proxy {
                 resource->status == httpparser::HttpResponseParser::ParsingIncompleted) {
                 log("It's size : " + std::to_string(resource->current_length));
                 log("It's count of parts : " + std::to_string(resource->parts.size()));
+                clients->at(client_fd).res_name = res_name;
                 for (auto msg: resource->parts) {
-                    clients->at(client_fd).message_queue.emplace_back(res_name, msg);
+                    clients->at(client_fd).message_queue.push_back(msg);
                 }
                 selected->add_fd(client_fd, io::select_data::WRITE);
                 resource->subscribers.insert(client_fd);
-                return status_code::SUCCESS;
+                return status_code::FAIL;
             }
             return status_code::FAIL;
         }
@@ -488,21 +494,22 @@ namespace single_thread_proxy {
 
     void http_proxy::send_resource_part(const std::string &resource_name, resource_info *resource) {
         if (resource->parts.empty()) return;
-        io::message *full_message = resource->parts.back();
+        io::message *full_message = resource->parts.front();
         for (int client_fd: resource->subscribers) {
             if (!clients->contains(client_fd)) {
                 continue;
             }
             selected->add_fd(client_fd, io::select_data::WRITE);
-            clients->at(client_fd).message_queue.emplace_back(resource_name, full_message);
+            clients->at(client_fd).res_name = resource_name;
+            clients->at(client_fd).message_queue.push_back(full_message);
         }
     }
 
     int http_proxy::read_server_response(int server_fd, io::message *new_part) {
         auto res_name = servers->at(server_fd).res_name;
         auto resource = cache->get(res_name);
-        log("Got new part of response with " + std::to_string(new_part->len) + " bytes");
-        resource->parts.push_back(new_part);
+//        log("Got new part of response with " + std::to_string(new_part->len) + " bytes");
+        resource->parts.insert(resource->parts.begin(), new_part);
         io::message *full_msg = new_part;
         if (resource->full_data != nullptr) {
             full_msg = resource->full_data;
