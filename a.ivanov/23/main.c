@@ -11,21 +11,34 @@
 #include "linked_list.h"
 
 #define SUCCESS (0)
-#define LEN_MSEC (200000)
+#define LEN_MSEC (400000)
 #define ERR_PRINT_CODE(name, code) fprintf(stderr, "error in %s(): %s\n", name, strerror(code))
 #define ERR_PRINT(name) fprintf(stderr, "error in %s()\n", name)
 #define MAX_STR_COUNT (10000)
+#define MAX_WAIT_TIME (20)
 
 static ts_list_t *lines_list;
-static pthread_barrier_t barrier;
+
+static int pipe_fds[2];
 
 static void *delayed_append(void *arg) {
     if (arg == NULL) {
         return NULL;
     }
-    int return_code = pthread_barrier_wait(&barrier);
-    if (return_code == PTHREAD_BARRIER_SERIAL_THREAD) {
-        pthread_barrier_destroy(&barrier);
+    int pipe_rfd = pipe_fds[0];
+    fd_set read_set;
+    FD_SET(pipe_rfd, &read_set);
+    struct timeval timeout = {
+            .tv_sec = MAX_WAIT_TIME,
+            .tv_usec = 0
+    };
+    int res = select(pipe_rfd + 1, &read_set, NULL, NULL, &timeout);
+    if (res < 0) {
+        ERR_PRINT("select");
+        pthread_exit(NULL);
+    } else if (res == 0) {
+        ERR_PRINT("timeout");
+        pthread_exit(NULL);
     }
     char *str = (char *) arg;
     size_t len = strlen(str);
@@ -52,6 +65,11 @@ static void join_thread(void *tidp) {
 }
 
 int main() {
+    int return_code = pipe(pipe_fds);
+    if (return_code != SUCCESS) {
+        ERR_PRINT("pipe");
+        pthread_exit(NULL);
+    }
     lines_list = init_ts_list();
     if (lines_list == NULL) {
         ERR_PRINT("init_ts_list");
@@ -76,14 +94,6 @@ int main() {
         }
         str_array[lines_count++] = str;
     }
-    int return_code = pthread_barrier_init(&barrier, NULL, lines_count);
-    if (return_code != SUCCESS) {
-        ERR_PRINT_CODE("pthread_barrier_init", return_code);
-        for (int i = 0; i < lines_count; i++) {
-            free(str_array[i]);
-        }
-        goto FREE_AND_EXIT;
-    }
     for (int i = 0; i < lines_count; i++) {
         char *str = str_array[i];
         pthread_t thread_id;
@@ -98,6 +108,11 @@ int main() {
             ERR_PRINT("append");
             goto FREE_AND_EXIT;
         }
+    }
+    ssize_t written = write(pipe_fds[1], "start!", 6);
+    if (written == -1) {
+        ERR_PRINT("write");
+        goto FREE_AND_EXIT;
     }
     iter(tids_list, join_thread);
     print_ts_list(stdout, lines_list, print_line);
