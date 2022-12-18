@@ -13,7 +13,7 @@ namespace {
         bool print_allowed;
     } args_t;
 
-    bool extract_int(const char *buf, int *num) {
+    bool ExtractInt(const char *buf, int *num) {
         if (nullptr == buf || num == nullptr) {
             return false;
         }
@@ -25,13 +25,13 @@ namespace {
         return true;
     }
 
-    args_t parse_args(int argc, char *argv[]) {
+    args_t ParseArgs(int argc, char *argv[]) {
         args_t result;
         result.valid = false;
         if (argc < REQUIRED_ARGC) {
             return result;
         }
-        bool extracted = extract_int(argv[1], &result.proxy_port);
+        bool extracted = ExtractInt(argv[1], &result.proxy_port);
         if (!extracted) {
             return result;
         }
@@ -47,12 +47,12 @@ namespace {
 }
 
 int main(int argc, char *argv[]) {
-    args_t args = parse_args(argc, argv);
+    args_t args = ParseArgs(argc, argv);
     if (!args.valid) {
         fprintf(stderr, "%s\n", USAGE_GUIDE);
         return EXIT_FAILURE;
     }
-    proxy *p = new single_thread_proxy::http_proxy(args.print_allowed);
+    proxy *p = new single_thread_proxy::HttpProxy(args.print_allowed);
     p->run(args.proxy_port);
     delete p;
     return EXIT_SUCCESS;

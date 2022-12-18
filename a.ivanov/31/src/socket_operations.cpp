@@ -7,7 +7,7 @@
 #include <unistd.h>
 
 namespace socket_operations {
-    int set_nonblocking(int serv_socket) {
+    int SetNonblocking(int serv_socket) {
         int option_value;
         int return_value = ioctl(serv_socket, FIONBIO, (char *) &option_value); // Set socket to be nonblocking
         if (return_value == status_code::FAIL) {
@@ -16,7 +16,7 @@ namespace socket_operations {
         return status_code::SUCCESS;
     }
 
-    int set_reusable(int serv_socket) {
+    int SetReusable(int serv_socket) {
         int option_value;
         int return_value = setsockopt(serv_socket, SOL_SOCKET, SO_REUSEADDR, // Allow socket descriptor to be reusable
                                       (char *) &option_value, sizeof(option_value));
@@ -26,7 +26,7 @@ namespace socket_operations {
         return status_code::SUCCESS;
     }
 
-    int connect_to_address(char *serv_ipv4_address, int port) {
+    int ConnectToAddress(char *serv_ipv4_address, int port) {
         if (port < 0 || port >= 65536) {
             return status_code::FAIL;
         }
@@ -55,7 +55,7 @@ namespace socket_operations {
         return sd;
     }
 
-    int make_new_connection_sockaddr(struct sockaddr_in *addr, int port) {
+    int ConnectToSockaddr(struct sockaddr_in *addr, int port) {
         int client_sd = socket(AF_INET, SOCK_STREAM, 0);
         if (client_sd == status_code::FAIL) {
             return status_code::FAIL;

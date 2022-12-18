@@ -7,39 +7,39 @@
 
 namespace aiwannafly {
     template <class T>
-    class map_cache final : public cache<T> {
+    class MapCache final : public Cache<T> {
     public:
 
-        map_cache() {
+        MapCache() {
             this->table = new std::map<std::string, T*>();
         }
 
-        ~map_cache() {
+        ~MapCache() {
             delete table;
         }
 
-        T *get(const std::string& key) {
+        T *get(const std::string& key) override {
             return table->at(key);
         }
 
-        void erase(const std::string &key) {
+        void erase(const std::string &key) override {
             table->erase(key);
         }
 
-        bool contains(const std::string &key) {
+        bool contains(const std::string &key) override {
             return table->contains(key);
         }
 
-        bool put(const std::string & key, T *value) {
+        bool put(const std::string & key, T *value) override {
             (*table)[key] = value;
             return true;
         };
 
-        size_t size() {
+        size_t size() override {
             return table->size();
         }
 
-        size_t size_bytes(std::function<size_t(const T *)> size) {
+        size_t sizeBytes(std::function<size_t(const T *)> size) override {
             size_t total_size = 0;
             for (auto it = table->begin(); it != table->end(); it++) {
                 total_size += size(it->second);
@@ -47,7 +47,7 @@ namespace aiwannafly {
             return total_size;
         }
 
-        void clear() {
+        void clear() override {
             for (auto it = table->begin(); it != table->end(); it++) {
                 delete it->second;
             }

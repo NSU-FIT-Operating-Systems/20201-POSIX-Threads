@@ -22,23 +22,23 @@ namespace single_thread_proxy {
     static const int HTTP_PORT = 80;
     int signal_pipe[2];
 
-    void http_proxy::log(const std::string &msg) const {
+    void HttpProxy::log(const std::string &msg) const {
         if (!print_allowed) return;
         std::cout << "[PROXY] " << msg << std::endl;
     }
 
-    void http_proxy::log_error(const std::string &msg) const {
+    void HttpProxy::logError(const std::string &msg) const {
         if (!print_allowed) return;
         std::cerr << "[PROXY] " << msg << std::endl;
     }
 
-    void http_proxy::log_error_with_errno(const std::string &msg) const {
+    void HttpProxy::logErrorWithErrno(const std::string &msg) const {
         if (!print_allowed) return;
         perror(("[PROXY] " + msg).data());
     }
 
-    void send_terminate(__attribute__((unused)) int sig) {
-        auto *terminate = new io::message();
+    void sendTerminate(__attribute__((unused)) int sig) {
+        auto *terminate = new io::Message();
         char *cmd = (char *) malloc(strlen(TERMINATE_CMD) + 1);
         if (cmd == nullptr) {
             return;
@@ -46,42 +46,42 @@ namespace single_thread_proxy {
         strcpy(cmd, TERMINATE_CMD);
         terminate->data = cmd;
         terminate->len = strlen(TERMINATE_CMD);
-        io::write_all(signal_pipe[io::WRITE_PIPE_END], terminate);
+        io::WriteAll(signal_pipe[io::WRITE_PIPE_END], terminate);
         delete terminate;
     }
 
-    int init_signal_handlers() {
+    int initSignalHandlers() {
         int return_value = pipe(signal_pipe);
         if (return_value == status_code::FAIL) {
             return status_code::FAIL;
         }
-        signal(SIGINT, send_terminate);
-        signal(SIGTERM, send_terminate);
+        signal(SIGINT, sendTerminate);
+        signal(SIGTERM, sendTerminate);
         return status_code::SUCCESS;
     }
 
-    void http_proxy::run(int port) {
+    void HttpProxy::run(int port) {
         is_running = true;
-        int ret_val = init_and_bind_proxy_socket(port);
+        int ret_val = initAndBindProxySocket(port);
         if (ret_val == status_code::FAIL) {
-            log_error("Could not init and bind proxy socket");
+            logError("Could not init and bind proxy socket");
             return;
         }
-        ret_val = init_signal_handlers();
+        ret_val = initSignalHandlers();
         if (ret_val == status_code::FAIL) {
-            log_error_with_errno("Could not init signal handlers");
+            logErrorWithErrno("Could not init signal handlers");
             return;
         }
         ret_val = listen(proxy_socket, MAX_LISTEN_QUEUE_SIZE);
         if (ret_val == status_code::FAIL) {
-            log_error_with_errno("Error in listen");
+            logErrorWithErrno("Error in listen");
             ret_val = close(proxy_socket);
             if (ret_val == status_code::FAIL) {
-                log_error_with_errno("Error in close");
+                logErrorWithErrno("Error in close");
             }
         }
-        selected->add_fd(proxy_socket, io::select_data::READ);
-        selected->add_fd(signal_pipe[io::READ_PIPE_END], io::select_data::READ);
+        selected->add_fd(proxy_socket, io::SelectData::READ);
+        selected->add_fd(signal_pipe[io::READ_PIPE_END], io::SelectData::READ);
         log("Running on " + std::to_string(port));
         fd_set constant_read_set;
         fd_set constant_write_set;
@@ -93,13 +93,13 @@ namespace single_thread_proxy {
                              nullptr, nullptr);
             if (ret_val == status_code::FAIL || ret_val == status_code::TIMEOUT) {
                 if (errno != EINTR && ret_val == status_code::FAIL) {
-                    log_error_with_errno("Error in select");
-                    free_resources();
+                    logErrorWithErrno("Error in select");
+                    freeResources();
                     return;
                 }
                 if (ret_val == status_code::TIMEOUT) {
                     log("Select timed out. End program.");
-                    free_resources();
+                    freeResources();
                     return;
                 }
             }
@@ -109,68 +109,68 @@ namespace single_thread_proxy {
                     desc_ready -= 1;
                     if (fd == proxy_socket) {
                         log("Handle new connection");
-                        ret_val = accept_new_client();
+                        ret_val = acceptNewClient();
                         if (ret_val == status_code::FAIL) {
-                            log_error_with_errno("Failed to accept new connection");
+                            logErrorWithErrno("Failed to accept new connection");
                             break;
                         }
                     } else {
 //                        log("Handle new message");
-                        ret_val = read_message_from(fd);
+                        ret_val = readMessageFrom(fd);
                         if (ret_val == status_code::TERMINATE) {
-                            free_resources();
+                            freeResources();
                             return;
                         }
                     }
                 }
                 if (FD_ISSET(fd, &constant_write_set)) {
                     desc_ready -= 1;
-                    ret_val = write_message_to(fd);
+                    ret_val = writeMessageTo(fd);
                     if (ret_val == status_code::FAIL) {
-                        log_error("Error occurred while handling the write message");
+                        logError("Error occurred while handling the write message");
                     }
                 }
             }
         }
     }
 
-    void http_proxy::shutdown() {
+    void HttpProxy::shutdown() {
         if (is_running) {
             is_running = false;
-            send_terminate(0);
+            sendTerminate(0);
         }
     }
 
-    void http_proxy::free_resources() {
+    void HttpProxy::freeResources() {
         log("Shutdown...");
-        log("Free cache of " + std::to_string(cache_size_bytes()) + " bytes");
+        log("Free cache of " + std::to_string(cacheSizeBytes()) + " bytes");
         cache->clear();
         int ret_val = close(proxy_socket);
         if (ret_val == status_code::FAIL) {
-            log_error_with_errno("Error in close(proxy_socket)");
+            logErrorWithErrno("Error in close(proxy_socket)");
         }
         for (int fd = 3; fd <= selected->get_max_fd(); fd++) {
             if (fd == proxy_socket) continue;
             if (FD_ISSET(fd, selected->get_read_set()) ||
                 FD_ISSET(fd, selected->get_write_set())) {
-                ret_val = close_connection(fd);
+                ret_val = closeConnection(fd);
                 if (ret_val == status_code::FAIL) {
-                    log_error_with_errno("Error in close_connection");
+                    logErrorWithErrno("Error in close_connection");
                 }
             }
         }
     }
 
-    http_proxy::http_proxy(bool print_allowed) {
+    HttpProxy::HttpProxy(bool print_allowed) {
         this->print_allowed = print_allowed;
-        selected = new io::select_data();
+        selected = new io::SelectData();
         clients = new std::map<int, client_info>();
         servers = new std::map<int, server_info>();
-        cache = new aiwannafly::map_cache<resource_info>();
+        cache = new aiwannafly::MapCache<resource_info>();
         DNS_map = new std::map<std::string, struct hostent *>();
     }
 
-    http_proxy::~http_proxy() {
+    HttpProxy::~HttpProxy() {
         delete selected;
         delete clients;
         delete servers;
@@ -179,22 +179,22 @@ namespace single_thread_proxy {
     }
 
     // returns proxy socket fd if success, status_code::FAIL otherwise
-    int http_proxy::init_and_bind_proxy_socket(int port) {
+    int HttpProxy::initAndBindProxySocket(int port) {
         proxy_socket = socket(AF_INET, SOCK_STREAM, 0);
         if (proxy_socket == status_code::FAIL) {
-            log_error_with_errno("Error in socket()");
+            logErrorWithErrno("Error in socket()");
             return status_code::FAIL;
         }
-        int return_value = socket_operations::set_reusable(proxy_socket);
+        int return_value = socket_operations::SetReusable(proxy_socket);
         if (return_value == status_code::FAIL) {
             close(proxy_socket);
-            log_error("Failed to make socket reusable");
+            logError("Failed to make socket reusable");
             return status_code::FAIL;
         }
-        return_value = socket_operations::set_nonblocking(proxy_socket);
+        return_value = socket_operations::SetNonblocking(proxy_socket);
         if (return_value == status_code::FAIL) {
             close(proxy_socket);
-            log_error("Failed to make socket reusable");
+            logError("Failed to make socket reusable");
             return status_code::FAIL;
         }
         struct sockaddr_in proxy_sockaddr{};
@@ -203,17 +203,17 @@ namespace single_thread_proxy {
         proxy_sockaddr.sin_port = htons(port);
         return_value = bind(proxy_socket, (struct sockaddr *) &proxy_sockaddr, sizeof(proxy_sockaddr));
         if (return_value < 0) {
-            log_error_with_errno("Error in bind");
+            logErrorWithErrno("Error in bind");
             return_value = close(proxy_socket);
             if (return_value == status_code::FAIL) {
-                log_error_with_errno("Error in close");
+                logErrorWithErrno("Error in close");
             }
             return status_code::FAIL;
         }
         return proxy_socket;
     }
 
-    int http_proxy::close_connection(int fd) {
+    int HttpProxy::closeConnection(int fd) {
         assert(fd > 0);
         servers->erase(fd);
         if (servers->contains(fd)) {
@@ -222,22 +222,22 @@ namespace single_thread_proxy {
             }
         }
         clients->erase(fd);
-        selected->remove_fd(fd, io::select_data::READ);
-        selected->remove_fd(fd, io::select_data::WRITE);
+        selected->remove_fd(fd, io::SelectData::READ);
+        selected->remove_fd(fd, io::SelectData::WRITE);
         int ret_val = close(fd);
         return ret_val;
     }
 
-    int http_proxy::read_message_from(int fd) {
+    int HttpProxy::readMessageFrom(int fd) {
         assert(fd > 0);
-        io::message *message = io::read_all(fd);
+        io::Message *message = io::read_all(fd);
         if (message == nullptr) {
             return status_code::FAIL;
         }
         if (message->len == 0) {
-            int ret_val = close_connection(fd);
+            int ret_val = closeConnection(fd);
             if (ret_val == status_code::FAIL) {
-                log_error_with_errno("Error in close connection");
+                logErrorWithErrno("Error in close connection");
                 return status_code::FAIL;
             }
             delete message;
@@ -252,13 +252,13 @@ namespace single_thread_proxy {
         // so, we've got message. what's next?
         // let's check out who sent it
         if (servers->contains(fd)) {
-            int ret_val = read_server_response(fd, message);
+            int ret_val = readServerResponse(fd, message);
             if (ret_val == status_code::FAIL) {
                 delete message;
             }
             return ret_val;
         } else if (clients->contains(fd)) {
-            int ret_val = read_client_request(fd, message);
+            int ret_val = readClientRequest(fd, message);
             if (ret_val == status_code::FAIL) {
                 delete message;
             }
@@ -268,7 +268,7 @@ namespace single_thread_proxy {
         return status_code::FAIL;
     }
 
-    int http_proxy::accept_new_client() {
+    int HttpProxy::acceptNewClient() {
         int new_client_fd = accept(proxy_socket, nullptr, nullptr);
         if (new_client_fd == status_code::FAIL) {
             if (errno != EAGAIN) {
@@ -276,42 +276,42 @@ namespace single_thread_proxy {
             }
             return status_code::FAIL;
         }
-        int return_value = socket_operations::set_nonblocking(new_client_fd);
+        int return_value = socket_operations::SetNonblocking(new_client_fd);
         if (return_value == status_code::FAIL) {
             close(new_client_fd);
             return status_code::FAIL;
         }
-        selected->add_fd(new_client_fd, io::select_data::READ);
+        selected->add_fd(new_client_fd, io::SelectData::READ);
         (*clients)[new_client_fd] = client_info();
         log("Accepted new client");
         return status_code::SUCCESS;
     }
 
-    int http_proxy::write_message_to(int fd) {
-        selected->remove_fd(fd, io::select_data::WRITE);
+    int HttpProxy::writeMessageTo(int fd) {
+        selected->remove_fd(fd, io::SelectData::WRITE);
         if (servers->contains(fd)) {
             assert(!clients->contains(fd));
             if (!servers->at(fd).connected) {
-                int ret_val = finish_connect_to_server(fd);
+                int ret_val = finishConnectToServer(fd);
                 if (ret_val == status_code::FAIL) {
-                    log_error_with_errno("Failed to make connection");
+                    logErrorWithErrno("Failed to make connection");
                 } else {
                     if (!servers->at(fd).message_queue.empty()) {
-                        selected->add_fd(fd, io::select_data::WRITE);
+                        selected->add_fd(fd, io::SelectData::WRITE);
                     }
                 }
             } else {
                 size_t msg_count = servers->at(fd).message_queue.size();
                 if (msg_count >= 1) {
-                    io::message *message = servers->at(fd).message_queue.back();
+                    io::Message *message = servers->at(fd).message_queue.back();
                     servers->at(fd).message_queue.pop_back();
-                    bool written = io::write_all(fd, message);
+                    bool written = io::WriteAll(fd, message);
                     delete message;
                     if (msg_count - 1 > 0) {
-                        selected->add_fd(fd, io::select_data::WRITE);
+                        selected->add_fd(fd, io::SelectData::WRITE);
                     }
                     if (!written) {
-                        log_error_with_errno("Error in write all");
+                        logErrorWithErrno("Error in write all");
                         return status_code::FAIL;
                     }
                 }
@@ -323,15 +323,15 @@ namespace single_thread_proxy {
             if (msg_count >= 1) {
                 auto msg = clients->at(fd).message_queue.front();
                 clients->at(fd).message_queue.erase(clients->at(fd).message_queue.begin());
-                bool written = io::write_all(fd, msg);
+                bool written = io::WriteAll(fd, msg);
                 if (!cache->contains(clients->at(fd).res_name)) {
                     delete msg;
                 }
                 if (msg_count - 1 > 0) {
-                    selected->add_fd(fd, io::select_data::WRITE);
+                    selected->add_fd(fd, io::SelectData::WRITE);
                 }
                 if (!written) {
-                    log_error_with_errno("Error in write all");
+                    logErrorWithErrno("Error in write all");
                     return status_code::FAIL;
                 } else {
 //                    log("Sent to client " + std::to_string(len) + " bytes");
@@ -341,7 +341,7 @@ namespace single_thread_proxy {
         return status_code::SUCCESS;
     }
 
-    int http_proxy::begin_connect_to_server(const std::string &hostname, int port) {
+    int HttpProxy::beginConnectToServer(const std::string &hostname, int port) {
         if (port < 0 || port >= 65536) {
             return status_code::FAIL;
         }
@@ -349,7 +349,7 @@ namespace single_thread_proxy {
         if (sd == status_code::FAIL) {
             return status_code::FAIL;
         }
-        int return_code = socket_operations::set_nonblocking(sd);
+        int return_code = socket_operations::SetNonblocking(sd);
         if (return_code == status_code::FAIL) {
             return status_code::FAIL;
         }
@@ -359,7 +359,7 @@ namespace single_thread_proxy {
         } else {
             hostnm = gethostbyname(hostname.data());
             if (hostnm == nullptr) {
-                log_error_with_errno("Failed to get by hostname");
+                logErrorWithErrno("Failed to get by hostname");
                 return status_code::FAIL;
             }
         }
@@ -371,20 +371,20 @@ namespace single_thread_proxy {
         return_code = connect(sd, (const struct sockaddr *) &serv_sockaddr, sizeof(serv_sockaddr));
         if (return_code < 0) {
             if (errno == EINPROGRESS) {
-                selected->add_fd(sd, io::select_data::WRITE);
+                selected->add_fd(sd, io::SelectData::WRITE);
                 (*servers)[sd] = server_info();
                 (*servers)[sd].connected = false;
                 return sd;
             }
             return status_code::FAIL;
         }
-        selected->add_fd(sd, io::select_data::READ);
+        selected->add_fd(sd, io::SelectData::READ);
         (*servers)[sd] = server_info();
         (*servers)[sd].connected = true;
         return sd;
     }
 
-    int http_proxy::finish_connect_to_server(int fd) {
+    int HttpProxy::finishConnectToServer(int fd) {
         assert((*servers).contains(fd));
         int opt = fcntl(fd, F_GETFL, NULL);
         if (opt < 0) {
@@ -399,12 +399,12 @@ namespace single_thread_proxy {
             errno = opt;
             return status_code::FAIL;
         }
-        selected->add_fd(fd, io::select_data::READ);
+        selected->add_fd(fd, io::SelectData::READ);
         servers->at(fd).connected = true;
         return status_code::SUCCESS;
     }
 
-    int http_proxy::read_client_request(int client_fd, io::message *request_message) {
+    int HttpProxy::readClientRequest(int client_fd, io::Message *request_message) {
         assert(request_message);
         assert(clients->contains(client_fd));
         httpparser::Request request;
@@ -434,16 +434,16 @@ namespace single_thread_proxy {
                 clients->at(client_fd).message_queue.push_back(msg);
             }
             if (!clients->at(client_fd).message_queue.empty()) {
-                selected->add_fd(client_fd, io::select_data::WRITE);
+                selected->add_fd(client_fd, io::SelectData::WRITE);
             }
             return status_code::FAIL;
         }
         for (const httpparser::Request::HeaderItem &header: request.headers) {
             log(header.name + std::string(" : ") + header.value);
             if (header.name == "Host") {
-                int ret_val = begin_connect_to_server(header.value, HTTP_PORT);
+                int ret_val = beginConnectToServer(header.value, HTTP_PORT);
                 if (ret_val == status_code::FAIL) {
-                    log_error_with_errno("Failed to connect to remote");
+                    logErrorWithErrno("Failed to connect to remote");
                     return status_code::FAIL;
                 }
                 int sd = ret_val;
@@ -461,23 +461,23 @@ namespace single_thread_proxy {
                 return ret_val;
             }
         }
-        log_error("Not found host header");
+        logError("Not found host header");
         return status_code::FAIL;
     }
 
-    size_t http_proxy::cache_size_bytes() {
-        return cache->size_bytes([](const resource_info *r) -> size_t {
+    size_t HttpProxy::cacheSizeBytes() {
+        return cache->sizeBytes([](const resource_info *r) -> size_t {
             size_t total_size = 0;
             for (auto msg: r->parts) {
-                total_size += io::message_size(msg);
+                total_size += msg->len;
             }
             return total_size;
         });
     }
 
-    void http_proxy::send_last_resource_part(const std::string &resource_name, resource_info *resource) {
+    void HttpProxy::sendLastResourcePart(const std::string &resource_name, resource_info *resource) {
         if (resource->parts.empty()) return;
-        io::message *full_message = resource->parts.back();
+        io::Message *full_message = resource->parts.back();
         if (resource->parts.size() == 1) {
             log("Count of subscribers : " + std::to_string(resource->subscribers.size()));
         }
@@ -486,24 +486,24 @@ namespace single_thread_proxy {
                 if (resource->parts.size() == 1) log("Don't work with the client");
                 continue;
             }
-            selected->add_fd(client_fd, io::select_data::WRITE);
+            selected->add_fd(client_fd, io::SelectData::WRITE);
             clients->at(client_fd).res_name = resource_name;
             clients->at(client_fd).message_queue.push_back(full_message);
         }
     }
 
-    int http_proxy::read_server_response(int server_fd, io::message *new_part) {
+    int HttpProxy::readServerResponse(int server_fd, io::Message *new_part) {
         auto res_name = servers->at(server_fd).res_name;
         if (!cache->contains(res_name)) {
             cache->put(res_name, new resource_info);
         }
         auto resource = cache->get(res_name);
         resource->parts.push_back(new_part);
-        io::message *full_msg = new_part;
+        io::Message *full_msg = new_part;
         if (resource->content_length == 0) {
             if (resource->full_data != nullptr) {
                 full_msg = resource->full_data;
-                bool added = io::append_msg(resource->full_data, new_part);
+                bool added = io::AppendMsg(resource->full_data, new_part);
                 if (!added) {
                     return status_code::FAIL;
                 }
@@ -513,14 +513,14 @@ namespace single_thread_proxy {
         }
         resource->current_length += new_part->len;
         if (resource->content_length > resource->current_length) {
-            send_last_resource_part(res_name, resource);
+            sendLastResourcePart(res_name, resource);
             return status_code::SUCCESS;
         } else if (resource->content_length == resource->current_length && resource->content_length > 0) {
-            send_last_resource_part(res_name, resource);
+            sendLastResourcePart(res_name, resource);
             resource->status = httpparser::HttpResponseParser::ParsingCompleted;
             delete resource->full_data;
             resource->full_data = nullptr;
-            log("Cache size: " + std::to_string(cache_size_bytes()));
+            log("Cache size: " + std::to_string(cacheSizeBytes()));
             return status_code::SUCCESS;
         }
         httpparser::Response response;
@@ -528,10 +528,10 @@ namespace single_thread_proxy {
         httpparser::HttpResponseParser::ParseResult res = parser.parse(response, full_msg->data,
                                                                        full_msg->data + full_msg->len);
         if (res == httpparser::HttpResponseParser::ParsingError) {
-            log_error("Failed to parse response of " + res_name);
+            logError("Failed to parse response of " + res_name);
             return status_code::FAIL;
         }
-        send_last_resource_part(res_name, resource);
+        sendLastResourcePart(res_name, resource);
         if (res == httpparser::HttpResponseParser::ParsingIncompleted) {
             auto content_length_header = std::find_if(response.headers.begin(), response.headers.end(),
                                                       [&](const httpparser::Response::HeaderItem &item) {
@@ -564,7 +564,7 @@ namespace single_thread_proxy {
             delete cache->get(res_name);
             cache->erase(res_name);
         }
-        log("Cache size: " + std::to_string(cache_size_bytes()));
+        log("Cache size: " + std::to_string(cacheSizeBytes()));
         return status_code::SUCCESS;
     }
 }

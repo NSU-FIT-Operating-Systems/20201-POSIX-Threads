@@ -12,13 +12,9 @@
 namespace io {
     static const int DEFAULT_BUFFER_SIZE = 128;
 
-    size_t message_size(const message *message) {
-        return message->len + 1 + 8;
-    }
-
-    message *copy(message *prev) {
+    Message *copy(Message *prev) {
         assert(prev);
-        auto *res = new message;
+        auto *res = new Message;
         res->len = prev->len;
         res->capacity = prev->capacity;
         res->data = (char *) malloc(res->capacity);
@@ -26,7 +22,7 @@ namespace io {
         return res;
     }
 
-    bool append_msg(message *a, message *b) {
+    bool AppendMsg(Message *a, Message *b) {
         assert(a);
         assert(b);
         size_t required_length = a->len + b->len + 1;
@@ -43,7 +39,7 @@ namespace io {
         return true;
     }
 
-    bool write_all(int fd, message *message) {
+    bool WriteAll(int fd, Message *message) {
         if (nullptr == message) {
             return false;
         }
@@ -84,7 +80,7 @@ namespace io {
         }
     }
 
-    message *read_all(int socket_fd) {
+    Message *read_all(int socket_fd) {
         size_t capacity = DEFAULT_BUFFER_SIZE;
         char *buffer = (char *) malloc(capacity + 1);
         if (buffer == nullptr) {
@@ -108,7 +104,7 @@ namespace io {
                     continue;
                 } else if (errno == EAGAIN) {
                     buffer[offset] = '\0';
-                    auto *message = new struct message;
+                    auto *message = new Message;
                     message->data = buffer;
                     message->len = offset;
                     message->capacity = capacity;
@@ -129,7 +125,7 @@ namespace io {
             }
         }
         buffer[offset] = '\0';
-        auto *message = new struct message;
+        auto *message = new Message;
         message->data = buffer;
         message->len = offset;
         message->capacity = capacity;

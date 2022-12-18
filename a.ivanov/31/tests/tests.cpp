@@ -4,6 +4,6 @@
  * usage: ./tests <proxy_port>
  */
 int main(int argc, char *argv[]) {
-    run_all_tests(argc, argv);
+    RunAllTests(argc, argv);
     return 0;
 }

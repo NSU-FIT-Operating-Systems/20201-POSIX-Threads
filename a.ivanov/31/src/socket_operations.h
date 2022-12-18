@@ -5,13 +5,13 @@
 
 namespace socket_operations {
 
-    int set_nonblocking(int serv_socket);
+    int SetNonblocking(int serv_socket);
 
-    int set_reusable(int serv_socket);
+    int SetReusable(int serv_socket);
 
-    int connect_to_address(char *serv_ipv4_address, int port);
+    int ConnectToAddress(char *serv_ipv4_address, int port);
 
-    int make_new_connection_sockaddr(struct sockaddr_in *addr, int port);
+    int ConnectToSockaddr(struct sockaddr_in *addr, int port);
 }
 
 #endif //HTTP_CPP_PROXY_SOCKET_OPERATIONS_H

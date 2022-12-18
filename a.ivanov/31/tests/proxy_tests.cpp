@@ -21,7 +21,7 @@ namespace {
         int proxy_port;
     } args_t;
 
-    bool extract_int(const char *buf, int *num) {
+    bool ExtractInt(const char *buf, int *num) {
         if (nullptr == buf || num == nullptr) {
             return false;
         }
@@ -33,13 +33,13 @@ namespace {
         return true;
     }
 
-    args_t parse_args(int argc, char *argv[]) {
+    args_t ParseArgs(int argc, char *argv[]) {
         args_t result;
         result.valid = false;
         if (argc < REQUIRED_ARGC) {
             return result;
         }
-        bool extracted = extract_int(argv[1], &result.proxy_port);
+        bool extracted = ExtractInt(argv[1], &result.proxy_port);
         if (!extracted) {
             return result;
         }
@@ -47,7 +47,7 @@ namespace {
         return result;
     }
 
-    size_t write_callback(void *contents, size_t size, size_t nmemb, void *userp) {
+    size_t WriteCallback(void *contents, size_t size, size_t nmemb, void *userp) {
         ((std::string *) userp)->append((char *) contents, size * nmemb);
         return size * nmemb;
     }
@@ -58,7 +58,7 @@ namespace {
         std::cout << "[ TEST     ] " << s << std::endl;
     }
 
-    void log_err(const std::string &s) {
+    void logErr(const std::string &s) {
         std::cerr << "[ ERROR    ] " + s + "\n";
     }
 
@@ -71,8 +71,8 @@ namespace {
         std::string url;
     } download_info;
 
-    void get_data(const std::string &url, bool with_proxy, std::string *buffer, CURLcode *res,
-                  long timeout_secs) {
+    void GetData(const std::string &url, bool with_proxy, std::string *buffer, CURLcode *res,
+                 long timeout_secs) {
         assert(buffer);
         assert(res);
         CURL *curl;
@@ -85,18 +85,18 @@ namespace {
         if (timeout_secs > 0) {
             curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout_secs);
         }
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, buffer);
         *res = curl_easy_perform(curl);
         if (*res != CURLE_OK) {
-            log_err(curl_easy_strerror(*res));
+            logErr(curl_easy_strerror(*res));
         }
         curl_easy_cleanup(curl);
     }
 
-    void *download_start(void *arg) {
+    void *DownloadStart(void *arg) {
         auto *info = (struct download_info *) arg;
-        get_data(info->url, info->with_proxy, &info->buffer, &info->code, info->timeout_secs);
+        GetData(info->url, info->with_proxy, &info->buffer, &info->code, info->timeout_secs);
         return nullptr;
     }
 }
@@ -104,7 +104,7 @@ namespace {
 TEST(HTTP_PROXY, BaseTest) {
     CURLcode res;
     std::string read_buffer;
-    get_data(TEST_FILES_URL, true, &read_buffer, &res, 0);
+    GetData(TEST_FILES_URL, true, &read_buffer, &res, 0);
     EXPECT_EQ(res, CURLE_OK);
 }
 
@@ -112,13 +112,13 @@ TEST(HTTP_PROXY, SpeedIncreaseTest) {
     CURLcode res;
     std::string read_buffer1;
     auto start = std::chrono::steady_clock::now();
-    get_data(DATA_100MB_URL, true, &read_buffer1, &res, 0);
+    GetData(DATA_100MB_URL, true, &read_buffer1, &res, 0);
     auto end = std::chrono::steady_clock::now();
     EXPECT_EQ(res, CURLE_OK);
     size_t millis_first = duration_cast<std::chrono::milliseconds>(end - start).count();
     std::string read_buffer2;
     start = std::chrono::steady_clock::now();
-    get_data(DATA_100MB_URL, true, &read_buffer2, &res, 0);
+    GetData(DATA_100MB_URL, true, &read_buffer2, &res, 0);
     end = std::chrono::steady_clock::now();
     EXPECT_EQ(res, CURLE_OK);
     size_t millis_second = duration_cast<std::chrono::milliseconds>(end - start).count();
@@ -139,7 +139,7 @@ TEST(HTTP_PROXY, MultipleConnectionsTest) {
         }
         info->url = DATA_50MB_URL;
         download_segments.push_back(info);
-        int code = pthread_create(&info->tid, nullptr, download_start, info);
+        int code = pthread_create(&info->tid, nullptr, DownloadStart, info);
         ASSERT_FALSE(code < 0);
     }
     for (const auto &info: download_segments) {
@@ -172,7 +172,7 @@ TEST(HTTP_PROXY, MultipleDisconnectionsTest) {
         }
         info->url = DATA_200MB_URL;
         download_segments.push_back(info);
-        int code = pthread_create(&info->tid, nullptr, download_start, info);
+        int code = pthread_create(&info->tid, nullptr, DownloadStart, info);
         ASSERT_FALSE(code < 0);
     }
     for (const auto &info: download_segments) {
@@ -194,8 +194,8 @@ TEST(HTTP_PROXY, MultipleDisconnectionsTest) {
     }
 }
 
-int run_all_tests(int argc, char *argv[]) {
-    args_t args = parse_args(argc, argv);
+int RunAllTests(int argc, char *argv[]) {
+    args_t args = ParseArgs(argc, argv);
     if (!args.valid) {
         fprintf(stderr, "%s\n", USAGE_GUIDE);
         return -1;

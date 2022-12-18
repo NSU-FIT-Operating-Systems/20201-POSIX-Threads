@@ -4,18 +4,18 @@
 #include <cstdlib>
 
 namespace io {
-    class select_data {
+    class SelectData {
     public:
         enum fd_type {
             READ, WRITE
         };
 
-        select_data() {
+        SelectData() {
             FD_ZERO(read_set);
             FD_ZERO(write_set);
         }
 
-        ~select_data() {
+        ~SelectData() {
             delete read_set;
             delete write_set;
         }
