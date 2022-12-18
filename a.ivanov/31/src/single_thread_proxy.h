@@ -6,7 +6,7 @@
 #include <set>
 #include <vector>
 
-#include "proxy.h"
+#include "runnable.h"
 #include "select_data.h"
 #include "io_operations.h"
 #include "map_cache.h"
@@ -55,7 +55,7 @@ namespace single_thread_proxy {
         ~ClientInfo() = default;
     } ClientInfo;
 
-    class HttpProxy final : public proxy {
+    class HttpProxy final : public Runnable {
     public:
 
         explicit HttpProxy(bool print_allowed);
@@ -63,8 +63,6 @@ namespace single_thread_proxy {
         ~HttpProxy() final;
 
         void run(int port) final;
-
-        void shutdown() final;
 
     private:
         void log(const std::string &msg) const;

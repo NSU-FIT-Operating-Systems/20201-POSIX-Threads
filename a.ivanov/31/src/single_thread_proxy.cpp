@@ -134,13 +134,6 @@ namespace single_thread_proxy {
         }
     }
 
-    void HttpProxy::shutdown() {
-        if (is_running) {
-            is_running = false;
-            sendTerminate(0);
-        }
-    }
-
     void HttpProxy::freeResources() {
         log("Shutdown...");
         log("Free cache of " + std::to_string(cacheSizeBytes()) + " bytes");
