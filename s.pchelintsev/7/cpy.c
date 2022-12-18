@@ -63,8 +63,12 @@ void pushWork(ThreadWork* wrk) {
 	pthread_mutex_unlock(&queueMtx);
 }
 
-void broadcastFinish() {
+void finishThread() {
 	__atomic_fetch_sub(&globals.active_threads, 1, __ATOMIC_SEQ_CST);
+}
+
+void broadcastFinish() {
+	finishThread();
 	pthread_mutex_lock(&queueMtx);
 	pthread_cond_signal(&cv);
 	pthread_mutex_unlock(&queueMtx);
@@ -135,8 +139,8 @@ void* thread_cpyDir(void* wrk) {
 				//printf("Couldn't open src; pushing back `%s`\n", work->src);
 
 				// We couldn't open the file; just push our work back onto the work queue and exit
+				finishThread();
 				pushWork(work);
-				broadcastFinish();
 				return NULL;
 			} else {
 				printf("error while opening source file (%s): ", work->src);
@@ -170,8 +174,8 @@ void* thread_cpyDir(void* wrk) {
 
 				// printf("Couldn't open dest; pushing back `%s`\n", work->src);
 
+			 	finishThread();
 				pushWork(work);
-				broadcastFinish();
 				return NULL;
 			} else {
 				close(fdRead);
