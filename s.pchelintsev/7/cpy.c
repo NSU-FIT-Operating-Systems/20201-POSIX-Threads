@@ -13,7 +13,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 
-#include "util/idk.h"
+#include "dynarr.h"
 #include "dirs.h"
 
 #define BUF_SIZE 8192 // completely arbitrary
