@@ -2,6 +2,7 @@
 
 #include <string.h>
 #include <sys/types.h>
+#include <sys/resource.h>
 #include <stdio.h>
 #include <dirent.h>
 #include <pthread.h>
@@ -14,19 +15,19 @@
 #include <sys/stat.h>
 
 #include "dynarr.h"
-#include "dirs.h"
 
-#define BUF_SIZE 8192 // completely arbitrary
-#define STACK_SIZE 65536 // also completely arbitrary, but, by default, it's 8mb on my 4gb rpi which is insane
-#define SLEEP_MS 100
+#define BUF_SIZE 4096 // completely arbitrary
+#define STACK_SIZE PTHREAD_STACK_MIN // also completely arbitrary, but, by default, it's 8mb on my 4gb rpi which is insane
+#define SLEEP_MS 250
+
+// i want to scream
+// LOUD
 
 DynArray* workStack;
 
 
 // stats for funny
 typedef struct glob_t {
-	int EMFILE_counter;
-	int EAGAIN_counter;
 	int active_threads;
 } Globals;
 
@@ -34,10 +35,7 @@ Globals globals;
 
 typedef struct work_t {
 	char* src;
-	int srcFd;
-
 	char* dest;
-	int destFd;
 
 	pthread_t thread;
 
@@ -57,8 +55,11 @@ pthread_cond_t cv;
 // since the queue by itself isn't
 void pushWork(ThreadWork* wrk) {
 	pthread_mutex_lock(&queueMtx);
+		size_t prevSz = daSize(workStack);
+
 		daPush(workStack, wrk);
-		pthread_cond_signal(&cv);
+		if (prevSz == 0)
+			pthread_cond_signal(&cv);
 
 	pthread_mutex_unlock(&queueMtx);
 }
@@ -69,18 +70,13 @@ void finishThread() {
 
 void broadcastFinish() {
 	finishThread();
+
 	pthread_mutex_lock(&queueMtx);
-	pthread_cond_signal(&cv);
+		pthread_cond_signal(&cv);
 	pthread_mutex_unlock(&queueMtx);
 }
 
 int createThreadWork(ThreadWork* wrk, bool alreadyLocked);
-
-pthread_t workStarter;
-void* thread_workStarter(void* a) {
-	
-	return NULL;
-}
 
 // blegh
 pthread_attr_t attr;
@@ -97,18 +93,9 @@ static void firstInit() {
 
 		pthread_attr_init(&attr);
 		pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-
 		pthread_attr_setstacksize(&attr, STACK_SIZE);
 
-		globals.EMFILE_counter = 0;
-		globals.EAGAIN_counter = 0;
 		globals.active_threads = 0;
-
-		/*int ok = pthread_create(&workStarter, NULL, &thread_workStarter, NULL);
-		if (ok != 0) {
-			perror("failed to create initial work starter thread!? ");
-			pthread_exit(NULL);
-		}*/
 	}
 }
 
@@ -121,24 +108,30 @@ void* thread_cpyDir(void* wrk) {
 	if (work->isDir) {
 		int ok = cpyDir(work->src, work->dest);
 		if (ok != 0) {
-			printf("error during cpydir: ");
-			perror("");
-			goto cleanup;
+			// EMFILE, EAGAIN returned if opendir fails - means we need to push the work ourselves
+			// EAGAIN 	returned if we couldn't create thread(s)
+			//			for the files in the directory; already handles the work
+
+			if (ok == EMFILE || ok == ENFILE || ok == EAGAIN) {
+				finishThread();
+				if (ok != EAGAIN) {
+					pushWork(work);
+				}
+				return NULL;
+			} else {
+				// not a normal error
+				printf("error during cpydir (%d): ", ok);
+				perror("");
+				goto cleanup;
+			}
 		}
 	} else {
-		int fdRead = work->srcFd;
+		// welcome to the dining philosophers problem
+		int fdRead = open(work->src, O_RDONLY);
 
-		while (fdRead == -1) { // file wasn't opened
-			fdRead = open(work->src, O_RDONLY);
-			if (fdRead != -1) break;
-
+		if (fdRead == -1) {
 			if (errno == EMFILE) {
-				// __atomic_fetch_add(&globals.EMFILE_counter, 1, __ATOMIC_SEQ_CST);
-				// sleep(1);
-
-				//printf("Couldn't open src; pushing back `%s`\n", work->src);
-
-				// We couldn't open the file; just push our work back onto the work queue and exit
+				// We couldn't open the file _yet_; just push our work back onto the work queue and exit
 				finishThread();
 				pushWork(work);
 				return NULL;
@@ -148,8 +141,6 @@ void* thread_cpyDir(void* wrk) {
 				goto cleanup;
 			}
 		}
-
-		work->srcFd = fdRead;
 
 		struct stat st;
 		int perms = 0;
@@ -163,29 +154,21 @@ void* thread_cpyDir(void* wrk) {
 			perms = st.st_mode & 07777;
 		}
 
-		int fdWrite = work->destFd;
-		while (fdWrite == -1) {
-			fdWrite = open(work->dest, O_WRONLY | O_CREAT, perms);
-			if (fdWrite != -1) break;
+		int fdWrite = open(work->dest, O_WRONLY | O_CREAT, perms);
+		if (fdWrite == -1) {
+			close(fdRead); // close and wait until both are available
 
-			 if (errno == EMFILE) {
-				// __atomic_fetch_add(&globals.EMFILE_counter, 1, __ATOMIC_SEQ_CST);
-				// sleep(1);
-
-				// printf("Couldn't open dest; pushing back `%s`\n", work->src);
-
+			if (errno == EMFILE) {
 			 	finishThread();
 				pushWork(work);
 				return NULL;
 			} else {
-				close(fdRead);
 				printf("error while opening destination file (%s): ", work->dest);
 				perror("");
 				goto cleanup;
 			}
 		}
 
-		work->destFd = fdWrite;
 		char buf[BUF_SIZE];
 		int a;
 
@@ -220,33 +203,29 @@ cleanupFiles:
 cleanup:
 	freeWork(wrk);
 	broadcastFinish();
-	// printf("EMFILE: %d, EAGAIN: %d\n", globals.EMFILE_counter, globals.EAGAIN_counter);
 
 	return NULL;
 }
 
 int createThreadWork(ThreadWork* wrk, bool alreadyLocked) {
-	while (1) {
-		int ok = pthread_create(&wrk->thread, &attr, thread_cpyDir, wrk);
-		if (ok == 0) { // success
-			__atomic_fetch_add(&globals.active_threads, 1, __ATOMIC_SEQ_CST);
-			return 0;
-		}
-
-		if (ok == EAGAIN) {
-			// printf("Couldn't create thread; pushing back `%s`\n", wrk->src);
-			// thread limit; put ourselves onto the work queue and die
-			if (alreadyLocked) {
-				daPush(workStack, wrk);
-			} else {
-				pushWork(wrk);
-			}
-		} else {
-			perror("failed to create copy thread");
-		}
-
-		return ok;
+	int ok = pthread_create(&wrk->thread, &attr, thread_cpyDir, wrk);
+	if (ok == 0) { // success
+		__atomic_fetch_add(&globals.active_threads, 1, __ATOMIC_SEQ_CST);
+		return 0;
 	}
+
+	if (ok == EAGAIN) {
+		// thread limit; put ourselves onto the work queue and die
+		if (alreadyLocked) {
+			daPush(workStack, wrk);
+		} else {
+			pushWork(wrk);
+		}
+	} else {
+		perror("failed to create copy thread");
+	}
+
+	return ok;
 }
 
 bool shouldSkip(const char* path) {
@@ -255,22 +234,23 @@ bool shouldSkip(const char* path) {
 
 int cpyDir(const char* from, const char* to) {
 	firstInit();
-	recursive_mkdir(to);
+
+	int dirOk = mkdir(to, 0777);
+	if (dirOk != 0 && errno != EEXIST) {
+		printf("failed to mkdir: ");
+		perror("");
+		return dirOk;
+	}
 
 	int fromLen = strlen(from);
 
-	DIR* inDir;
-	while (1) {
-		inDir = opendir(from);
-		if (inDir != NULL) break;
+	DIR* inDir = opendir(from);
 
+	if (inDir == NULL) {
 		if (errno == EMFILE || errno == ENFILE) {
-			// A good idea would be to slam ourselves back into the work queue if we couldnt open the dir
-			// but also im lazy so zzzzzzzzzz
-			errno = 0; // ignore this error
-			__atomic_fetch_add(&globals.EMFILE_counter, 1, __ATOMIC_SEQ_CST);
-			usleep(SLEEP_MS * 1000);
-			errno = 0;
+			// Just return this error; this is normal operation
+			// Whoever called us should handle it
+			return errno;
 		} else {
 			printf("error while opening dir (%s): ", from);
 			perror("");
@@ -321,15 +301,12 @@ int cpyDir(const char* from, const char* to) {
 
 		ThreadWork* wrk = malloc(sizeof(ThreadWork));
 		if (wrk == NULL) {
-			// printf("allocation failure, dies of errno race\n");
+			closedir(inDir);
 			return errno;
 		}
 
 		wrk->src = NULL;
-		wrk->srcFd = -1;
-
 		wrk->dest = NULL;
-		wrk->destFd = -1;
 
 		errno = 0;
 
@@ -374,6 +351,8 @@ cleanup_thread:
 		if (wrk->src != NULL) 	free(wrk->src);
 		if (wrk->dest != NULL) 	free(wrk->dest);
 		free(wrk);
+		printf("cleanup_thread occured; this is bad!!!\n");
+		break;
 	}
 
 	/* Cleanup */
@@ -393,10 +372,12 @@ int main(int argc, char** argv) {
 	pthread_mutex_lock(&queueMtx);
 
 	while (1) {
-		while (daSize(workStack) == 0) loop: { // we may wake up to an empty queue (broadcastFinish)
-
+		// we may wake up to an empty queue (broadcastFinish)
+		while (daSize(workStack) == 0) sleep: {
 			int threads = __atomic_load_n(&globals.active_threads, __ATOMIC_RELAXED);
-			if (threads == 0) goto exit;
+			// Double-check workStack size; we may end up here from a goto
+			// 	while the stack isn't actually empty
+			if (threads == 0 && daSize(workStack) == 0) goto exit;
 
 			clock_gettime(CLOCK_REALTIME, &ts);
 			ts.tv_nsec += SLEEP_MS * 1e6;
@@ -408,18 +389,27 @@ int main(int argc, char** argv) {
 			pthread_cond_timedwait(&cv, &queueMtx, &ts);
 		}
 
+		// int threads = __atomic_load_n(&globals.active_threads, __ATOMIC_RELAXED);
+		// printf("have %d works... %d active threads.\n", daSize(workStack), threads);
+
+		int created = 0;
+
 		// Create as many threads as we can before sleeping again
 		while (daSize(workStack) != 0) {
 			ThreadWork* wrk = daPop(workStack);
 
 			int ok = createThreadWork(wrk, true);
-			if (ok != 0) goto loop; // just unlock and wait until someone else queues something up
+			if (ok != 0) {
+				// printf("Created %d before dying (%s)\n", created, strerror(ok));
+				goto sleep; // just unlock and wait until someone else queues something up
+			}
+			created++;
 		}
 	}
 exit:
+	printf("Finished! %d works\n", daSize(workStack));
 	pthread_mutex_unlock(&queueMtx);
 
-	printf("Finished!\n");
 	pthread_exit(NULL);
-	// daFree(workStack);
+	daFree(workStack);
 }

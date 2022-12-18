@@ -1,12 +1,12 @@
 local fs = require("fs")
 local path = require("path")
 
-local layers = 2
+local layers = 4
 local max_open_handles = 500
 
 local function getAmt(layer)
 	if layer <= 0 then return 1 end
-	return 100
+	return 15
 end
 
 local function getName(num, typ)
