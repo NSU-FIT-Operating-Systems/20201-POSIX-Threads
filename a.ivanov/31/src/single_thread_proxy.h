@@ -36,7 +36,7 @@ namespace single_thread_proxy {
                 }
             }
         }
-    } resource_info;
+    } ResourceInfo;
 
     typedef struct ServerInfo {
         std::vector<io::Message *> message_queue = std::vector<io::Message *>();
@@ -45,7 +45,7 @@ namespace single_thread_proxy {
 
         ServerInfo() = default;
         ~ServerInfo() = default;
-    } server_info;
+    } ServerInfo;
 
     typedef struct ClientInfo {
         std::vector<io::Message *> message_queue = std::vector<io::Message *>();
@@ -53,7 +53,7 @@ namespace single_thread_proxy {
 
         ClientInfo() = default;
         ~ClientInfo() = default;
-    } client_info;
+    } ClientInfo;
 
     class HttpProxy final : public proxy {
     public:

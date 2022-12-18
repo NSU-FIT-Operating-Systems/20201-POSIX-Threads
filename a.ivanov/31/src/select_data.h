@@ -20,7 +20,7 @@ namespace io {
             delete write_set;
         }
 
-        void add_fd(int fd, fd_type type) {
+        void addFd(int fd, fd_type type) {
             if (type == READ) {
                 FD_SET(fd, read_set);
             } else {
@@ -42,15 +42,15 @@ namespace io {
             }
         }
 
-        [[nodiscard]] fd_set *get_read_set() const {
+        [[nodiscard]] fd_set *getReadSet() const {
             return read_set;
         }
 
-        [[nodiscard]] fd_set *get_write_set() const {
+        [[nodiscard]] fd_set *getWriteSet() const {
             return write_set;
         }
 
-        [[nodiscard]] int get_max_fd() const {
+        [[nodiscard]] int getMaxFd() const {
             return max_fd;
         }
 
