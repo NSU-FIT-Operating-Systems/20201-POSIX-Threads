@@ -2,12 +2,15 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdatomic.h>
+#include <unistd.h>
 
 #define NUMBER_OF_LINES 10
 
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
 int cur_printing_thread = 0;
+atomic_int finished = 0;
 
 // обёртка для pthread_mutex_lock()
 int lock_mutex(pthread_mutex_t *mutex_lock) {
@@ -98,7 +101,7 @@ void *print_messages(const char *message, int calling_thread) {
             pthread_exit(0);
         }
     }
-
+    ++finished;
 }
 
 void *second_print(void *param) {
@@ -118,6 +121,10 @@ int main() {
     }
 
     print_messages("Parent\n", 0);
+
+    while(finished != 2){
+        sleep(1);
+    }
 
     pthread_mutex_destroy(&mutex);
     pthread_cond_destroy(&cond);
