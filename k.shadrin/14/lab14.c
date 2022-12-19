@@ -2,6 +2,7 @@
 #include <pthread.h>
 #include <string.h>
 #include <semaphore.h>
+#include <errno.h>
 
 #define NUMBER_OF_LINES 10
 
@@ -16,7 +17,14 @@ int wait_semaphore(sem_t *sem) {
         printf("You've tried to wait for the NULL semaphore!");
         return -1;
     }
-    int errorCode = sem_wait(sem);
+    struct timespec ts;
+    if(clock_gettime(CLOCK_REALTIME, &ts) == -1){
+        printf("Failed to clock_gettime in wait_semaphore!\n");
+        return -1;
+    }
+    ts.tv_sec += 3;
+    errno = 0;
+    int errorCode = sem_timedwait(sem, &ts);
     if (errorCode == -1) {
         printf("Unable to wait semaphore!");
         return errorCode;
