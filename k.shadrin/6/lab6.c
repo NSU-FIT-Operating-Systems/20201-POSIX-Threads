@@ -2,12 +2,15 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <string.h>
+#include <stdatomic.h>
 
 int all_inited = 0;
 pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-
+atomic_int count = 0;
+atomic_int finished = 0;
 void *thread_start_routine(void *params) {
+    ++count;
     int err;
     err = pthread_mutex_lock(&mutex);
     if(err != 0){
@@ -28,8 +31,9 @@ void *thread_start_routine(void *params) {
         pthread_exit(0);
     }
     char *string = (char*)params;
-    usleep(strlen(string) * 100000);
+    usleep(strlen(string) * 25000);
     printf("%s\n", string);
+    ++finished;
     pthread_exit(0);
 }
 
@@ -40,20 +44,26 @@ int main(int argc, char *argv[]) {
     }
     pthread_t threads[100];
     int err;
-    printf("%d\n", argc - 1);
+    int thread_num = 0;
     for(int i = 1; i < argc; ++i){
         err = pthread_create(&threads[i - 1], NULL, thread_start_routine, (void *) argv[i]);
         if (err != 0) {
             printf("pthread_create error: ");
             pthread_exit(0);
         }
+        thread_num++;
     }
+
+    while(count != thread_num){
+        sleep(1);
+    }
+    
+    printf("Sort started!\n");
     err = pthread_mutex_lock(&mutex);
     if(err != 0){
         printf("pthread_mutex_lock error!");
         pthread_exit(0);
     }
-    
     all_inited = 1;
     err = pthread_cond_broadcast(&cond);
     if(err != 0){
@@ -67,15 +77,20 @@ int main(int argc, char *argv[]) {
         pthread_exit(0);
     }
 
+    while (finished != thread_num)
+    {
+        sleep(1);
+    }
+    
     err = pthread_cond_destroy(&cond);
     if(err != 0){
         printf("pthread_cond_destroy error!");
         pthread_exit(0);
     }
     
-    err = pthread_mutex_unlock(&mutex);
+    err = pthread_mutex_destroy(&mutex);
     if(err != 0){
-        printf("pthread_mutex_unlock error!");
+        printf("pthread_mutex_destroy error!");
         pthread_exit(0);
     }
     pthread_exit(0);
