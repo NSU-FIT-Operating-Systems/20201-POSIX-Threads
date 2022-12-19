@@ -97,6 +97,7 @@ HASH_STATIC common_error_code_t HASH_NAME(remove)(
     HASH_VALUE_TYPE *stored_value_result
 );
 HASH_STATIC HASH_VALUE_TYPE const *HASH_NAME(get)(HASH_TYPE const *self, HASH_KEY_TYPE const *key);
+HASH_STATIC HASH_VALUE_TYPE *HASH_NAME(get_mut)(HASH_TYPE *self, HASH_KEY_TYPE const *key);
 
 // Iterates over the contents of the hash table, calling the callback for each
 // key-value pair.
@@ -173,6 +174,8 @@ HASH_STATIC common_error_code_t HASH_NAME(new)(
     assert(eq_comparator != NULL);
     assert(result != NULL);
 
+    common_error_code_t status = COMMON_ERROR_CODE_OK;
+
     result->storage = NULL;
     result->capacity = 0;
     result->len = 0;
@@ -182,9 +185,9 @@ HASH_STATIC common_error_code_t HASH_NAME(new)(
     result->secondary = secondary_hasher;
     result->eq = eq_comparator;
 
-    TRY(HASH_NAME(rehash)(result));
+    status = HASH_NAME(rehash)(result);
 
-    return COMMON_ERROR_CODE_OK;
+    return status;
 }
 
 HASH_STATIC void HASH_NAME(free)(HASH_TYPE *self) {
@@ -251,8 +254,10 @@ HASH_STATIC common_error_code_t HASH_NAME(insert)(
 ) {
     assert(self != NULL);
 
+    common_error_code_t status = COMMON_ERROR_CODE_OK;
+
     if (should_rehash(self->non_free_entries, self->capacity)) {
-        TRY(HASH_NAME(rehash)(self));
+        GOTO_ON_ERROR(status = HASH_NAME(rehash)(self), fail);
     }
 
     size_t pos = HASH_NAME(index_for_key)(self, &key, false);
@@ -262,7 +267,8 @@ HASH_STATIC common_error_code_t HASH_NAME(insert)(
     ++self->len;
     ++self->non_free_entries;
 
-    return COMMON_ERROR_CODE_OK;
+fail:
+    return status;
 }
 
 HASH_STATIC common_error_code_t HASH_NAME(remove)(
@@ -295,6 +301,19 @@ HASH_STATIC common_error_code_t HASH_NAME(remove)(
 }
 
 HASH_STATIC HASH_VALUE_TYPE const *HASH_NAME(get)(HASH_TYPE const *self, HASH_KEY_TYPE const *key) {
+    assert(self != NULL);
+    assert(key != NULL);
+
+    size_t pos = HASH_NAME(index_for_key)(self, key, true);
+
+    if (self->storage[pos].state != HASH_NAME(STATE_OCCUPIED)) {
+        return NULL;
+    }
+
+    return &self->storage[pos].value;
+}
+
+HASH_STATIC HASH_VALUE_TYPE *HASH_NAME(get_mut)(HASH_TYPE *self, HASH_KEY_TYPE const *key) {
     assert(self != NULL);
     assert(key != NULL);
 

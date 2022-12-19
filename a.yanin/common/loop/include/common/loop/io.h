@@ -3,6 +3,6 @@
 #include <stddef.h>
 
 typedef struct {
-    void *base;
+    char *base;
     size_t len;
 } slice_t;

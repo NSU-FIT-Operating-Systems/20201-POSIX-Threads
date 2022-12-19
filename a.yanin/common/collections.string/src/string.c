@@ -188,6 +188,35 @@ fail:
     return status;
 }
 
+common_error_code_t string_append_slice(string_t *self, char const *begin, size_t count) {
+    assert(self != NULL);
+    assert(begin != NULL || count == 0);
+
+    common_error_code_t status = COMMON_ERROR_CODE_OK;
+
+    size_t len = vec_uchar_len(&self->storage);
+    vec_uchar_remove(&self->storage, len - 1);
+    status = vec_uchar_append_slice(&self->storage, (unsigned char const *) begin, count);
+
+    common_error_code_t null_status = vec_uchar_push(&self->storage, '\0');
+
+    if (status == COMMON_ERROR_CODE_OK) {
+        status = null_status;
+    }
+
+    if (status != COMMON_ERROR_CODE_OK) {
+        // the `len - 1`th element is always available:
+        // - if append failed, the `null_status` must have succeeded because no reallocation has
+        //   occured
+        // - if append succeeded but the string could not be terminated, reallocation has occured
+        //   and the vector's length has grown
+        *vec_uchar_get_mut(&self->storage, len - 1) = '\0';
+        vec_uchar_set_len(&self->storage, len);
+    }
+
+    return status;
+}
+
 void string_remove(string_t *self, size_t pos) {
     assert(self != NULL);
     assert(pos < string_len(self));

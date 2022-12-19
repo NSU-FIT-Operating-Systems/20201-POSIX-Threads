@@ -7,6 +7,10 @@
 #include "util.h"
 
 void handler_init(handler_t *self, handler_vtable_t const *vtable, int fd) {
+    if (fd < 0) {
+        fd = -1;
+    }
+
     self->vtable = vtable;
     self->custom_data = NULL;
     self->loop = NULL;
@@ -59,6 +63,10 @@ void handler_lock(handler_t *self) {
 
 void handler_unlock(handler_t *self) {
     assert_mutex_unlock(&self->mtx);
+}
+
+int handler_fd(handler_t const *self) {
+    return self->fd;
 }
 
 void handler_force(handler_t *self) {

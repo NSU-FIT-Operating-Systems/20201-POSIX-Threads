@@ -8,12 +8,14 @@
 #error "ARC_LABEL is not defined"
 #endif
 
+#ifndef ARC_CONFIG
+#define ARC_CONFIG COLLECTION_DEFAULT
+#endif
+
+#if (ARC_CONFIG) & (COLLECTION_DEFINE)
 #ifndef ARC_FREE_CB
 #error "ARC_FREE_CB is not defined"
 #endif
-
-#ifndef ARC_CONFIG
-#define ARC_CONFIG COLLECTION_DEFAULT
 #endif
 
 #ifndef ARC_GENERIC_NAME
@@ -130,5 +132,5 @@ ARC_STATIC size_t ARC_NAME(count)(ARC_TYPE const *self) {
 
 #undef ARC_CONFIG
 #undef ARC_FREE_CB
-#undef ARC_LABEl
+#undef ARC_LABEL
 #undef ARC_ELEMENT_TYPE

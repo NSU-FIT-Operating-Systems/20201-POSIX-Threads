@@ -27,6 +27,7 @@ void string_free(string_t *self);
 common_error_code_t string_insert(string_t *self, size_t pos, unsigned char ch);
 common_error_code_t string_push(string_t *self, unsigned char ch);
 common_error_code_t string_append(string_t *self, string_t const *other);
+common_error_code_t string_append_slice(string_t *self, char const *begin, size_t count);
 void string_remove(string_t *self, size_t pos);
 void string_pop(string_t *self);
 void string_clear(string_t *self);

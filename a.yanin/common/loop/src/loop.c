@@ -213,14 +213,12 @@ push_fail:
 }
 
 static error_t *loop_prepare_pollfd_process_handler(
-    loop_t *self,
+    loop_t *,
     vec_pollfd_t *pollfd,
     vec_pollfd_meta_t *meta,
     arc_handler_t *handler_arc,
     bool *has_forced_handlers
 ) {
-    (void) self;
-
     error_t *err = NULL;
     handler_t *handler = arc_handler_get(handler_arc);
     handler_lock(handler);

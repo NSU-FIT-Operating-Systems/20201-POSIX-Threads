@@ -186,6 +186,8 @@ void handler_lock(handler_t *self);
 void handler_unlock(handler_t *self);
 
 // Returns the fd managed by the handler.
+//
+// Returns `-1` if the handler has no associated fd.
 int handler_fd(handler_t const *self);
 
 // Forces the handler's process method to be called on the next (or current) loop iteration,

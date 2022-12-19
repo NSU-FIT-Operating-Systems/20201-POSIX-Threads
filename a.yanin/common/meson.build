@@ -24,11 +24,11 @@ subdir('memory.arc')
 # A double-linked list implementation.
 subdir('collections.dlist')
 
-# A typed hashmap with double hashing collision resolution.
-subdir('collections.hash')
-
 # A typed dynamic array.
 subdir('collections.vec')
+
+# A typed hashmap with double hashing collision resolution.
+subdir('collections.hash')
 
 # A collection that provides constant-time index-based element lookup,
 # with the indices preserved across element insertion/removals.

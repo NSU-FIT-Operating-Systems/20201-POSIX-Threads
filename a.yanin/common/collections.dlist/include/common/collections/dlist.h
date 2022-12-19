@@ -105,6 +105,16 @@ DLIST_STATIC size_t DLIST_NAME(len)(DLIST_TYPE const *self);
 
 DLIST_STATIC void DLIST_NAME(concat)(DLIST_TYPE *self, DLIST_TYPE other);
 DLIST_STATIC void DLIST_NAME(swap)(DLIST_TYPE *self, DLIST_NODE_TYPE *lhs, DLIST_NODE_TYPE *rhs);
+DLIST_STATIC void DLIST_NAME(move_before)(
+    DLIST_TYPE *self,
+    DLIST_NODE_TYPE *node,
+    DLIST_NODE_TYPE *before
+);
+DLIST_STATIC void DLIST_NAME(move_after)(
+    DLIST_TYPE *self,
+    DLIST_NODE_TYPE *node,
+    DLIST_NODE_TYPE *before
+);
 
 #endif // #if (DLIST_CONFIG) & COLLECTION_DECLARE
 
@@ -477,6 +487,80 @@ DLIST_STATIC void DLIST_NAME(swap)(DLIST_TYPE *self, DLIST_NODE_TYPE *lhs, DLIST
         self->end = rhs;
     } else if (self->end == rhs) {
         self->end = lhs;
+    }
+}
+
+DLIST_STATIC void DLIST_NAME(move_before)(
+    DLIST_TYPE *self,
+    DLIST_NODE_TYPE *node,
+    DLIST_NODE_TYPE *before
+) {
+    assert(self != NULL);
+    assert(node != NULL);
+    assert(DLIST_NAME(contains)(self, node));
+    assert(before == NULL || DLIST_NAME(contains)(self, before));
+
+    if (before == node || before == DLIST_NAME(next)(node)) {
+        return;
+    }
+
+    if (before == NULL) {
+        DLIST_NAME(move_after)(self, node, DLIST_NAME(end_mut)(self));
+    }
+
+    DLIST_NODE_TYPE *node_prev = DLIST_NAME(prev_mut)(node);
+    DLIST_NODE_TYPE *node_next = DLIST_NAME(next_mut)(node);
+    DLIST_NODE_TYPE *before_prev = DLIST_NAME(prev_mut)(before);
+
+    DLIST_NAME(unlink_both)(node);
+    DLIST_NAME(link)(before_prev, node);
+    DLIST_NAME(link)(node, before);
+
+    if (node == self->head) {
+        self->head = node_next;
+    } else if (before == self->head) {
+        self->head = node;
+    }
+
+    if (node == self->end) {
+        self->end = node_prev;
+    }
+}
+
+DLIST_STATIC void DLIST_NAME(move_after)(
+    DLIST_TYPE *self,
+    DLIST_NODE_TYPE *node,
+    DLIST_NODE_TYPE *after
+) {
+    assert(self != NULL);
+    assert(node != NULL);
+    assert(DLIST_NAME(contains)(self, node));
+    assert(after == NULL || DLIST_NAME(contains)(self, after));
+
+    if (after == node || after == DLIST_NAME(prev)(node)) {
+        return;
+    }
+
+    if (after == NULL) {
+        DLIST_NAME(move_after)(self, node, DLIST_NAME(head_mut)(self));
+    }
+
+    DLIST_NODE_TYPE *node_prev = DLIST_NAME(prev_mut)(node);
+    DLIST_NODE_TYPE *node_next = DLIST_NAME(next_mut)(node);
+    DLIST_NODE_TYPE *after_next = DLIST_NAME(next_mut)(after);
+
+    DLIST_NAME(unlink_both)(node);
+    DLIST_NAME(link)(after, node);
+    DLIST_NAME(link)(node, after_next);
+
+    if (node == self->head) {
+        self->head = node_next;
+    }
+
+    if (node == self->end) {
+        self->end = node_prev;
+    } else if (after == self->end) {
+        self->end = node;
     }
 }
 
