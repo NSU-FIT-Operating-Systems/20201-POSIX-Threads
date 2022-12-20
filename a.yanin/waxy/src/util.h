@@ -34,9 +34,25 @@ static bool slice_cmp(slice_t lhs, slice_t rhs) {
 }
 
 [[maybe_unused]]
-static slice_t rebase_slice(char *base, char *new_base, slice_t slice) {
+static slice_t rebase_slice(char const *base, char *new_base, slice_t slice) {
     return (slice_t) {
-        .base = new_base + (slice.base - base),
+        .base = base == NULL ? NULL : new_base + (slice.base - base),
         .len = slice.len,
+    };
+}
+
+[[maybe_unused]]
+static slice_t slice_from_cstr(char const *str) {
+    return (slice_t) {
+        .base = str,
+        .len = strlen(str),
+    };
+}
+
+[[maybe_unused]]
+static slice_t slice_empty(void) {
+    return (slice_t) {
+        .base = NULL,
+        .len = 0,
     };
 }

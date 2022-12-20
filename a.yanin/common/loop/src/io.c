@@ -85,11 +85,11 @@ error_t *io_process_write_req(
             i < req->slice_count && vec_iovec_len(&iov) < iov_size;
             ++i) {
         slice_t slice = req->slices[i];
-        void *base = slice.base;
+        char const *base = slice.base;
         size_t len = slice.len;
 
         if (i == first_unfinished_idx) {
-            base = (char *) base + written_count;
+            base = base + written_count;
             len -= written_count;
         }
 
@@ -100,7 +100,7 @@ error_t *io_process_write_req(
         write_requested += len;
 
         vec_iovec_push(&iov, (struct iovec) {
-            .iov_base = base,
+            .iov_base = (char *) base,
             .iov_len = len,
         });
     }

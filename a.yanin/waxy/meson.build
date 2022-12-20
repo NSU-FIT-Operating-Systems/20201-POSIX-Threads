@@ -9,6 +9,7 @@ dependencies = [
   common_modules['error'],
   common_modules['error-codes.adapter'],
   common_modules['executor'],
+  common_modules['io'],
   common_modules['log'],
   common_modules['loop'],
   common_modules['memory.arc'],

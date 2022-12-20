@@ -147,6 +147,13 @@ void string_from_raw(char *buf, size_t capacity, string_t *result) {
     };
 }
 
+common_error_code_t string_clone(string_t const *self, string_t *result) {
+    assert(self != NULL);
+    assert(result != NULL);
+
+    return vec_uchar_clone(&self->storage, &result->storage);
+}
+
 void string_free(string_t *self) {
     assert(self != NULL);
 
@@ -245,6 +252,13 @@ unsigned char string_get(string_t const *self, size_t pos) {
     return *vec_uchar_get(&self->storage, pos);
 }
 
+unsigned char *string_get_mut(string_t *self, size_t pos) {
+    assert(self != NULL);
+    assert(pos < string_len(self));
+
+    return vec_uchar_get_mut(&self->storage, pos);
+}
+
 unsigned char const *string_as_ptr(string_t const *self) {
     assert(self != NULL);
 
@@ -255,6 +269,12 @@ char const *string_as_cptr(string_t const *self) {
     assert(self != NULL);
 
     return (char *) string_as_ptr(self);
+}
+
+char *string_as_cptr_mut(string_t *self) {
+    assert(self != NULL);
+
+    return (char *) vec_uchar_as_ptr_mut(&self->storage);
 }
 
 bool string_equals(string_t const *self, string_t const *other) {
@@ -297,4 +317,12 @@ size_t string_capacity(string_t const *self) {
     assert(self != NULL);
 
     return vec_uchar_capacity(&self->storage);
+}
+
+void string_set_len(string_t *self, size_t len) {
+    assert(self != NULL);
+    assert(len <= string_len(self));
+
+    vec_uchar_set_len(&self->storage, len + 1);
+    *vec_uchar_get_mut(&self->storage, len) = '\0';
 }
