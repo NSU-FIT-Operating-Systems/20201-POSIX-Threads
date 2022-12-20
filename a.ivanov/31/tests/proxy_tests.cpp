@@ -55,11 +55,11 @@ namespace {
     size_t port;
 
     void log(const std::string &s) {
-        std::cout << "[ TEST     ] " << s << std::endl;
+        std::cout << "[   LOG     ] " << s << std::endl;
     }
 
     void logErr(const std::string &s) {
-        std::cerr << "[ ERROR    ] " + s + "\n";
+        std::cerr << "[   LOG    ] " + s + "\n";
     }
 
     typedef struct download_info {
@@ -154,41 +154,72 @@ TEST(HTTP_PROXY, MultipleConnectionsTest) {
     }
 }
 
-TEST(HTTP_PROXY, MultipleDisconnectionsTest) {
-    size_t conns_count = 5;
-    log("Launching " + std::to_string(conns_count) + " 200MB-download sessions "
-                                                     "through PROXY with strict time limits");
-    ASSERT_FALSE(conns_count <= 0);
-    auto download_segments = std::vector<download_info *>();
-    for (long i = 0; i < conns_count; i++) {
-        auto info = new download_info();
-        info->timeout_secs = (i + 1) * 5;
-        if (i == 0) {
-            info->with_proxy = false;
-            info->timeout_secs = 0; // get first file without proxy
+TEST(HTTP_PROXY, RotationTest) {
+    size_t rotations_count = 5;
+    size_t conns_count = 10;
+    std::string url = DATA_200MB_URL;
+
+    std::string read_buffer0;
+    CURLcode res;
+    log("Launching rotation test with multiple 200MB-download sessions");
+    auto start = std::chrono::steady_clock::now();
+    GetData(url, false, &read_buffer0, &res, 0);
+    auto end = std::chrono::steady_clock::now();
+    size_t total_time_millis = duration_cast<std::chrono::milliseconds>(end - start).count();
+    log("Downloading time without proxy : " + std::to_string(total_time_millis / 1000) + " seconds");
+    size_t time_chunk_millis = total_time_millis / rotations_count;
+    ASSERT_EQ(res, CURLE_OK);
+    ASSERT_TRUE(total_time_millis > 0);
+    auto lead_segments = std::vector<download_info *>();
+    for (size_t j = 0; j < rotations_count; j++) {
+        auto download_segments = std::vector<download_info *>();
+        size_t lead_idx = 0;
+        log("Initiate new rotation launch");
+        for (long i = 0; i < conns_count; i++) {
+            auto info = new download_info();
+            info->url = url;
+            info->timeout_secs = time_chunk_millis / 1000;
+            if (i == lead_idx) {
+                info->timeout_secs *= 2; // get first file without proxy
+                if (j == rotations_count - 1) {
+                    info->timeout_secs = 0;
+                }
+                lead_segments.push_back(info);
+            } else {
+                download_segments.push_back(info);
+            }
+            int code = pthread_create(&info->tid, nullptr, DownloadStart, info);
+            ASSERT_FALSE(code < 0);
         }
-        if (i == conns_count - 1) {
-            info->timeout_secs = 0; // no timeout for the last one
+        start = std::chrono::steady_clock::now();
+        for (const auto &info : download_segments) {
+            int code = pthread_join(info->tid, nullptr);
+            ASSERT_FALSE(code < 0);
+            EXPECT_TRUE(info->code == CURLE_OPERATION_TIMEDOUT || info->code
+                                                                  == CURLE_OK);
+            if (info->code == CURLE_OK) {
+                EXPECT_EQ(read_buffer0, info->buffer);
+            }
+            delete info;
         }
-        info->url = DATA_200MB_URL;
-        download_segments.push_back(info);
-        int code = pthread_create(&info->tid, nullptr, DownloadStart, info);
-        ASSERT_FALSE(code < 0);
+        end = std::chrono::steady_clock::now();
+        size_t rot_millis = duration_cast<std::chrono::milliseconds>(end - start).count();
+        log("Rotation " + std::to_string(j + 1) + " ended in " + std::to_string(rot_millis / 1000) + " seconds");
     }
-    for (const auto &info: download_segments) {
+    size_t count = 0;
+    for (const auto &info : lead_segments) {
+        count++;
         int code = pthread_join(info->tid, nullptr);
         ASSERT_FALSE(code < 0);
-    }
-    auto canonic_buffer = download_segments.front()->buffer;
-    int count = 0;
-    for (const auto &info: download_segments) {
-        count++;
-        EXPECT_TRUE(info->code == CURLE_OK || info->code == CURLE_OPERATION_TIMEDOUT);
-        if (count == conns_count) {
+        if (count == rotations_count) {
             EXPECT_EQ(info->code, CURLE_OK);
-        }
-        if (count == conns_count) {
-            EXPECT_EQ(canonic_buffer, info->buffer);
+            EXPECT_EQ(read_buffer0, info->buffer);
+        } else {
+            EXPECT_TRUE(info->code == CURLE_OPERATION_TIMEDOUT || info->code
+            == CURLE_OK);
+            if (info->code == CURLE_OK) {
+                EXPECT_EQ(read_buffer0, info->buffer);
+            }
         }
         delete info;
     }

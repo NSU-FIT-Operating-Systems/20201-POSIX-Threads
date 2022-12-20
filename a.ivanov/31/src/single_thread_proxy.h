@@ -50,6 +50,7 @@ namespace single_thread_proxy {
     typedef struct ClientInfo {
         std::vector<io::Message *> message_queue = std::vector<io::Message *>();
         std::string res_name;
+        size_t recv_msg_count = 0;
 
         ClientInfo() = default;
         ~ClientInfo() = default;
@@ -87,7 +88,7 @@ namespace single_thread_proxy {
 
         int finishConnectToServer(int fd);
 
-        void sendLastResourcePart(const std::string &resource_name, ResourceInfo *resource);
+        void sendNewestResourcePart(const std::string &resource_name, ResourceInfo *resource);
 
         int closeConnection(int fd);
 

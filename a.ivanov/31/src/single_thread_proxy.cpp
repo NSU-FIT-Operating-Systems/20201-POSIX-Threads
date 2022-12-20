@@ -50,6 +50,8 @@ namespace single_thread_proxy {
         delete terminate;
     }
 
+    void doNothing(int sig) {}
+
     int initSignalHandlers() {
         int return_value = pipe(signal_pipe);
         if (return_value == status_code::FAIL) {
@@ -57,6 +59,7 @@ namespace single_thread_proxy {
         }
         signal(SIGINT, sendTerminate);
         signal(SIGTERM, sendTerminate);
+        signal(SIGPIPE, doNothing);
         return status_code::SUCCESS;
     }
 
@@ -105,6 +108,13 @@ namespace single_thread_proxy {
             }
             int desc_ready = ret_val;
             for (int fd = 0; fd <= selected->getMaxFd() && desc_ready > 0; ++fd) {
+                if (FD_ISSET(fd, &constant_write_set)) {
+                    desc_ready -= 1;
+                    ret_val = writeMessageTo(fd);
+                    if (ret_val == status_code::FAIL) {
+                        logError("Error occurred while handling the write message");
+                    }
+                }
                 if (FD_ISSET(fd, &constant_read_set)) {
                     desc_ready -= 1;
                     if (fd == proxy_socket) {
@@ -118,16 +128,10 @@ namespace single_thread_proxy {
 //                        log("Handle new message");
                         ret_val = readMessageFrom(fd);
                         if (ret_val == status_code::TERMINATE) {
+                            logError("Terminate");
                             freeResources();
                             return;
                         }
-                    }
-                }
-                if (FD_ISSET(fd, &constant_write_set)) {
-                    desc_ready -= 1;
-                    ret_val = writeMessageTo(fd);
-                    if (ret_val == status_code::FAIL) {
-                        logError("Error occurred while handling the write message");
                     }
                 }
             }
@@ -214,11 +218,17 @@ namespace single_thread_proxy {
                 delete msg;
             }
         }
+        if (clients->contains(fd)) {
+            logError("Client " + std::to_string(fd) + " disconnects");
+            auto res_name = clients->at(fd).res_name;
+            if (cache->contains(res_name)) {
+                cache->get(res_name)->subscribers.erase(fd);
+            }
+        }
         clients->erase(fd);
         selected->remove_fd(fd, io::SelectData::READ);
         selected->remove_fd(fd, io::SelectData::WRITE);
-        int ret_val = close(fd);
-        return ret_val;
+        return close(fd);
     }
 
     int HttpProxy::readMessageFrom(int fd) {
@@ -276,7 +286,7 @@ namespace single_thread_proxy {
         }
         selected->addFd(new_client_fd, io::SelectData::READ);
         (*clients)[new_client_fd] = ClientInfo();
-        log("Accepted new client");
+        log("Client " + std::to_string(new_client_fd) + " connected");
         return status_code::SUCCESS;
     }
 
@@ -327,6 +337,7 @@ namespace single_thread_proxy {
                     logErrorWithErrno("Error in write all");
                     return status_code::FAIL;
                 } else {
+                    clients->at(fd).recv_msg_count++;
 //                    log("Sent to client " + std::to_string(len) + " bytes");
                 }
             }
@@ -408,9 +419,8 @@ namespace single_thread_proxy {
         if (res != httpparser::HttpRequestParser::ParsingCompleted) {
             return status_code::FAIL;
         }
-        log(request.method);
+        log(request.method + " for " + std::to_string(client_fd));
         log(request.uri);
-        log(std::string("HTTP Version is 1." + std::to_string(request.versionMinor)));
         std::string res_name = request.uri;
         if (request.method != "GET") {
             return status_code::FAIL;
@@ -421,14 +431,14 @@ namespace single_thread_proxy {
             ResourceInfo *resource = cache->get(res_name);
             resource->subscribers.insert(client_fd);
             log("It's size : " + std::to_string(resource->current_length));
-            log("It's count of parts : " + std::to_string(resource->parts.size()));
             clients->at(client_fd).res_name = res_name;
-            for (auto msg: resource->parts) {
-                clients->at(client_fd).message_queue.push_back(msg);
-            }
-            if (!clients->at(client_fd).message_queue.empty()) {
+            clients->at(client_fd).message_queue.clear();
+            if (!resource->parts.empty()) {
                 selected->addFd(client_fd, io::SelectData::WRITE);
             }
+            std::copy(resource->parts.begin(), resource->parts.end(),
+                      std::back_inserter(clients->at(client_fd).message_queue));
+            log("Got " + std::to_string(clients->at(client_fd).message_queue.size()) + " chunks of resource");
             return status_code::FAIL;
         }
         for (const httpparser::Request::HeaderItem &header: request.headers) {
@@ -468,9 +478,9 @@ namespace single_thread_proxy {
         });
     }
 
-    void HttpProxy::sendLastResourcePart(const std::string &resource_name, ResourceInfo *resource) {
+    void HttpProxy::sendNewestResourcePart(const std::string &resource_name, ResourceInfo *resource) {
         if (resource->parts.empty()) return;
-        io::Message *full_message = resource->parts.back();
+        io::Message *newestPart = resource->parts.back();
         if (resource->parts.size() == 1) {
             log("Count of subscribers : " + std::to_string(resource->subscribers.size()));
         }
@@ -481,15 +491,17 @@ namespace single_thread_proxy {
             }
             selected->addFd(client_fd, io::SelectData::WRITE);
             clients->at(client_fd).res_name = resource_name;
-            clients->at(client_fd).message_queue.push_back(full_message);
+            clients->at(client_fd).message_queue.push_back(newestPart);
         }
     }
 
     int HttpProxy::readServerResponse(int server_fd, io::Message *new_part) {
         auto res_name = servers->at(server_fd).res_name;
         if (!cache->contains(res_name)) {
+            logError("Response with out name in cache");
             cache->put(res_name, new ResourceInfo);
         }
+//        log("Received " + std::to_string(new_part->len) + " bytes");
         auto resource = cache->get(res_name);
         resource->parts.push_back(new_part);
         io::Message *full_msg = new_part;
@@ -506,10 +518,10 @@ namespace single_thread_proxy {
         }
         resource->current_length += new_part->len;
         if (resource->content_length > resource->current_length) {
-            sendLastResourcePart(res_name, resource);
+            sendNewestResourcePart(res_name, resource);
             return status_code::SUCCESS;
         } else if (resource->content_length == resource->current_length && resource->content_length > 0) {
-            sendLastResourcePart(res_name, resource);
+            sendNewestResourcePart(res_name, resource);
             resource->status = httpparser::HttpResponseParser::ParsingCompleted;
             delete resource->full_data;
             resource->full_data = nullptr;
@@ -524,7 +536,7 @@ namespace single_thread_proxy {
             logError("Failed to parse response of " + res_name);
             return status_code::FAIL;
         }
-        sendLastResourcePart(res_name, resource);
+        sendNewestResourcePart(res_name, resource);
         if (res == httpparser::HttpResponseParser::ParsingIncompleted) {
             auto content_length_header = std::find_if(response.headers.begin(), response.headers.end(),
                                                       [&](const httpparser::Response::HeaderItem &item) {
