@@ -64,15 +64,31 @@ void pushWork(ThreadWork* wrk) {
 	pthread_mutex_unlock(&queueMtx);
 }
 
-void finishThread() {
-	__atomic_fetch_sub(&globals.active_threads, 1, __ATOMIC_SEQ_CST);
+
+int finishThread() {
+	return __atomic_fetch_sub(&globals.active_threads, 1, __ATOMIC_SEQ_CST);
 }
 
 void broadcastFinish() {
-	finishThread();
+	int curThreads = finishThread();
+
+	if (curThreads == 0) {
+		pthread_mutex_lock(&queueMtx);
+			pthread_cond_signal(&cv);
+		pthread_mutex_unlock(&queueMtx);
+	}
+}
+
+void finishAndPush(ThreadWork* wrk) {
+	int curThreads = finishThread();
 
 	pthread_mutex_lock(&queueMtx);
-		pthread_cond_signal(&cv);
+		size_t prevSz = daSize(workStack);
+
+		daPush(workStack, wrk);
+		if (prevSz == 0 || curThreads == 0)
+			pthread_cond_signal(&cv);
+
 	pthread_mutex_unlock(&queueMtx);
 }
 
@@ -86,7 +102,7 @@ static void firstInit() {
 	if (!initted) {
 		initted = true;
 
-		workStack = daNew(64, NULL);
+		workStack = daNew(256, NULL);
 
 		pthread_mutex_init(&queueMtx, NULL);
 		pthread_cond_init(&cv, NULL);
@@ -113,9 +129,10 @@ void* thread_cpyDir(void* wrk) {
 			//			for the files in the directory; already handles the work
 
 			if (ok == EMFILE || ok == ENFILE || ok == EAGAIN) {
-				finishThread();
 				if (ok != EAGAIN) {
-					pushWork(work);
+					finishAndPush(work);
+				} else {
+					finishThread();
 				}
 				return NULL;
 			} else {
@@ -132,8 +149,7 @@ void* thread_cpyDir(void* wrk) {
 		if (fdRead == -1) {
 			if (errno == EMFILE) {
 				// We couldn't open the file _yet_; just push our work back onto the work queue and exit
-				finishThread();
-				pushWork(work);
+				finishAndPush(work);
 				return NULL;
 			} else {
 				printf("error while opening source file (%s): ", work->src);
@@ -159,8 +175,7 @@ void* thread_cpyDir(void* wrk) {
 			close(fdRead); // close and wait until both are available
 
 			if (errno == EMFILE) {
-			 	finishThread();
-				pushWork(work);
+			 	finishAndPush(work);
 				return NULL;
 			} else {
 				printf("error while opening destination file (%s): ", work->dest);
