@@ -12,19 +12,24 @@ typedef struct url {
     slice_t username;
     slice_t password;
 
-    // can be NULL
+    // can be `NULL`, check `host_null`
     slice_t host;
 
-    // if the port is null, stores 0xffff'ffff (-1)
-    uint32_t port;
+    // can be `NULL`, check `port_null`
+    uint16_t port;
 
     slice_t path;
 
-    // can be NULL
+    // can be `NULL`, check `query_null`
     slice_t query;
 
-    // can be NULL
+    // can be `NULL`, check `fragment_null`
     slice_t fragment;
+
+    bool host_null;
+    bool port_null;
+    bool query_null;
+    bool fragment_null;
 } url_t;
 
 // Compares two `url_t` instances for equality.
@@ -41,8 +46,3 @@ error_t *url_copy(url_t const *url, url_t *result);
 // Assumes the input is valid UTF-8.
 // It won't break if it's not, but it may percent-encode bytes incorrectly.
 error_t *url_parse(slice_t slice, url_t *result);
-
-[[maybe_unused]]
-static inline bool slice_is_null(slice_t slice) {
-    return slice.len < 0;
-}

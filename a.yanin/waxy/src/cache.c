@@ -1,10 +1,11 @@
 #include "cache.h"
-#include "util.h"
 
 #include <common/error-codes/adapter.h>
 #include <common/loop/loop.h>
 #include <pthread.h>
 #include <stdatomic.h>
+
+#include "util.h"
 
 typedef url_t const *url_ptr_t;
 
@@ -217,8 +218,7 @@ static error_t *cache_create_entry_unsync(
     pthread_mutexattr_destroy(&mtx_attr);
     if (err) goto mtx_init_fail;
 
-    err = error_wrap("Could not copy the URL", error_from_errno(
-        url_copy(url, &entry->url)));
+    err = error_wrap("Could not copy the URL", url_copy(url, &entry->url));
     if (err) goto url_copy_fail;
 
     entry->handles = vec_rd_new();
@@ -256,7 +256,7 @@ arc_new_fail:
 
 string_new_fail:
     vec_rd_free(&entry->handles);
-    free(entry->url.buf);
+    string_free(&entry->url.buf);
 
 url_copy_fail:
     error_assert(error_from_errno(pthread_mutex_destroy(&entry->mtx)));
@@ -462,7 +462,7 @@ static error_t *cache_entry_new_rd(arc_entry_t *arc, cache_rd_t **result) {
 
 static void cache_entry_free(cache_entry_t *self) {
     pthread_mutex_destroy(&self->mtx);
-    free(self->url.buf);
+    string_free(&self->url.buf);
     vec_rd_free(&self->handles);
     string_free(&self->buf);
     self->state = CACHE_ENTRY_INVALID;

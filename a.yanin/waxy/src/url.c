@@ -150,6 +150,10 @@ error_t *url_copy(url_t const *url, url_t *result) {
     result->path = rebase_slice(base, new_base, url->path);
     result->query = rebase_slice(base, new_base, url->query);
     result->fragment = rebase_slice(base, new_base, url->fragment);
+    result->host_null = url->host_null;
+    result->port_null = url->port_null;
+    result->query_null = url->query_null;
+    result->fragment_null = url->fragment_null;
 
     return 0;
 }
@@ -563,6 +567,7 @@ static error_t *url_parser_host(url_parser_t *self) {
         }
 
         self->result->host = url_parser_slice(self);
+        self->result->host_null = false;
         self->state = STATE_PORT;
     } else if (c == EOF || c == '/' || c == '?' || c == '#' || (self->special && c == '\\')) {
         --self->pos;
@@ -574,6 +579,7 @@ static error_t *url_parser_host(url_parser_t *self) {
         }
 
         self->result->host = url_parser_slice(self);
+        self->result->host_null = false;
         self->state = STATE_PATH;
     } else {
         if (c == '[') {
@@ -620,6 +626,9 @@ static error_t *url_parser_port(url_parser_t *self) {
                 self->state = STATE_FAIL;
                 goto fail;
             }
+
+            self->result->port = (uint16_t) port;
+            self->result->port_null = false;
         }
 
         --self->pos;
@@ -649,6 +658,7 @@ static error_t *url_parser_file(url_parser_t *self) {
     }
 
     self->result->host = slice_empty();
+    self->result->host_null = false;
     int c = url_parser_c(self);
 
     if (c == '/' || c == '\\') {
@@ -706,9 +716,11 @@ static error_t *url_parser_file_host(url_parser_t *self) {
             self->state = STATE_PATH;
         } else if (url_parser_buf_len(self) == 0) {
             self->result->host = slice_empty();
+            self->result->host_null = false;
             self->state = STATE_PATH_START;
         } else {
             self->result->host = url_parser_slice(self);
+            self->result->host_null = false;
             self->state = STATE_PATH_START;
         }
     } else {
@@ -741,9 +753,11 @@ static error_t *url_parser_path_start(url_parser_t *self) {
         }
     } else if (c == '?') {
         self->result->query = slice_empty();
+        self->result->query_null = false;
         self->state = STATE_QUERY;
     } else if (c == '#') {
         self->result->fragment = slice_empty();
+        self->result->fragment_null = false;
         self->state = STATE_FRAGMENT;
     } else if (c != EOF) {
         self->state = STATE_PATH;
@@ -782,11 +796,13 @@ static error_t *url_parser_path(url_parser_t *self) {
 
         if (c == '?') {
             self->result->query = slice_empty();
+            self->result->query_null = false;
             self->state = STATE_QUERY;
         }
 
         if (c == '#') {
             self->result->fragment = slice_empty();
+            self->result->fragment_null = false;
             self->state = STATE_FRAGMENT;
         }
     } else {
@@ -819,10 +835,12 @@ static error_t *url_parser_opaque_path(url_parser_t *self) {
     if (c == '?') {
         self->result->path = url_parser_slice(self);
         self->result->query = slice_empty();
+        self->result->query_null = false;
         self->state = STATE_QUERY;
     } else if (c == '#') {
         self->result->path = url_parser_slice(self);
         self->result->fragment = slice_empty();
+        self->result->fragment_null = false;
         self->state = STATE_FRAGMENT;
     } else {
         if (c != EOF && !is_url_ascii(c) && c < 0x80 && c != '%') {
@@ -855,9 +873,11 @@ static error_t *url_parser_query(url_parser_t *self) {
 
     if (c == '#' || c == EOF) {
         self->result->query = url_parser_slice(self);
+        self->result->query_null = false;
 
         if (c == '#') {
             self->result->fragment = slice_empty();
+            self->result->fragment_null = false;
             self->state = STATE_FRAGMENT;
         }
     } else if (c != EOF) {
@@ -890,6 +910,7 @@ static error_t *url_parser_fragment(url_parser_t *self) {
 
     if (c == EOF) {
         self->result->fragment = url_parser_slice(self);
+        self->result->fragment_null = false;
     } else {
         if (!is_url_ascii(c) && c != '%') {
             err = error_from_cstr("An illegal character was detected in the fragment", NULL);
@@ -928,14 +949,18 @@ error_t *url_parse(slice_t slice, url_t *result) {
 
     url_t url = {
         .buf = buf,
-        .scheme = { .base = NULL, .len = 0 },
-        .username = { .base = NULL, .len = 0 },
-        .password = { .base = NULL, .len = 0 },
-        .host = { .base = NULL, .len = -1 },
-        .port = 0xffff'ffff,
-        .path = { .base = NULL, .len = 0 },
-        .query = { .base = NULL, .len = -1 },
-        .fragment = { .base = NULL, .len = -1 },
+        .scheme = slice_empty(),
+        .username = slice_empty(),
+        .password = slice_empty(),
+        .host = slice_empty(),
+        .port = 0,
+        .path = slice_empty(),
+        .query = slice_empty(),
+        .fragment = slice_empty(),
+        .host_null = true,
+        .port_null = true,
+        .query_null = true,
+        .fragment_null = true,
     };
 
     err = error_combine(err, url_remove_trailing(&input));
