@@ -164,3 +164,12 @@ void tcp_shutdown_output(tcp_handler_t *self);
 
 bool tcp_is_input_shutdown(tcp_handler_t const *self);
 bool tcp_is_output_shutdown(tcp_handler_t const *self);
+
+// Sets a callback for last-resort error handling.
+void tcp_server_set_on_error(tcp_handler_server_t *self, tcp_server_on_error_cb_t on_error);
+
+// Sets a callback for last-resort error handling.
+void tcp_set_on_error(tcp_handler_t *self, tcp_on_error_cb_t on_error);
+
+// Retrieves the address of the remote peer.
+void tcp_address(tcp_handler_t const *self, struct sockaddr const **addr, socklen_t *len);

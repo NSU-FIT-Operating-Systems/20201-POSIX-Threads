@@ -27,9 +27,13 @@ mt_dependencies = dependencies + [
 ]
 
 common_sources = [
-  'src/main.c',
   'src/cache.c',
+  'src/client.c',
+  'src/gai-adapter.c',
+  'src/main.c',
+  'src/server.c',
   'src/url.c',
+  'src/util.c',
 ]
 
 st_sources = common_sources + [

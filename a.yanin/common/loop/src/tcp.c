@@ -676,3 +676,16 @@ bool tcp_is_input_shutdown(const tcp_handler_t *self) {
 bool tcp_is_output_shutdown(const tcp_handler_t *self) {
     return self->output_shut;
 }
+
+void tcp_server_set_on_error(tcp_handler_server_t *self, tcp_server_on_error_cb_t on_error) {
+    self->on_error = on_error;
+}
+
+void tcp_set_on_error(tcp_handler_t *self, tcp_on_error_cb_t on_error) {
+    self->on_error = on_error;
+}
+
+void tcp_address(tcp_handler_t const *self, struct sockaddr const **addr, socklen_t *len) {
+    *addr = &self->peer_address.addr;
+    *len = self->peer_address.len;
+}
