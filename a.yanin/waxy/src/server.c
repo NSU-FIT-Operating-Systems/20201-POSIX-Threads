@@ -83,11 +83,9 @@ static error_t *server_on_new_conn(loop_t *loop, tcp_handler_server_t *serv) {
     if (err) goto loop_register_fail;
 
     char ip[INET6_ADDRSTRLEN] = {0};
-    struct sockaddr const *addr = NULL;
-    socklen_t len = 0;
-    tcp_address(handler, &addr, &len);
-    address_to_string(addr, len, ip);
-    log_printf(LOG_INFO, "Accepted a new connection from %s:%d", ip, port_from_address(addr));
+    uint16_t port = 0;
+    tcp_remote_info(handler, ip, &port);
+    log_printf(LOG_INFO, "Accepted a new connection from %s:%u", ip, port);
 
     return err;
 
@@ -224,5 +222,8 @@ void server_free(server_t *self) {
 }
 
 error_t *server_run(server_t *self) {
-    return loop_run(self->loop);
+    error_t *err = loop_run(self->loop);
+    executor_shutdown(self->executor);
+
+    return err;
 }

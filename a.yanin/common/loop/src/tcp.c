@@ -1,5 +1,6 @@
 #include "common/loop/tcp.h"
 
+#include <arpa/inet.h>
 #include <stdint.h>
 
 #include <netinet/in.h>
@@ -688,4 +689,38 @@ void tcp_set_on_error(tcp_handler_t *self, tcp_on_error_cb_t on_error) {
 void tcp_address(tcp_handler_t const *self, struct sockaddr const **addr, socklen_t *len) {
     *addr = &self->peer_address.addr;
     *len = self->peer_address.len;
+}
+
+void tcp_remote_info(tcp_handler_t const *self, char buf[static INET6_ADDRSTRLEN], uint16_t *port) {
+    int af = self->peer_address.addr.sa_family;
+    char const *result = NULL;
+    errno = 0;
+
+    switch (af) {
+    case AF_INET:
+        result = inet_ntop(
+            af,
+            &((struct sockaddr_in const *) &self->peer_address.addr)->sin_addr,
+            buf,
+            INET6_ADDRSTRLEN
+        );
+        *port = ((struct sockaddr_in const *) &self->peer_address.addr)->sin_port;
+
+        break;
+
+    case AF_INET6:
+        result = inet_ntop(
+            af,
+            &((struct sockaddr_in6 const *) &self->peer_address.addr)->sin6_addr,
+            buf,
+            INET6_ADDRSTRLEN
+        );
+        *port = ((struct sockaddr_in6 const *) &self->peer_address.addr)->sin6_port;
+
+        break;
+    }
+
+    error_assert(error_wrap("Could not convert the address to text form", error_combine(
+        OK_IF(result != NULL),
+        error_from_errno(errno))));
 }

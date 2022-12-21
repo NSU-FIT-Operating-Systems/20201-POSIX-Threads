@@ -57,17 +57,3 @@ static slice_t slice_empty(void) {
         .len = 0,
     };
 }
-
-// Converts `addr` to its string form and stores the result in `buf`.
-//
-// Aborts the program if the family is not recognized.
-void address_to_string(
-    struct sockaddr const *addr,
-    socklen_t len,
-    char buf[static INET6_ADDRSTRLEN]
-);
-
-// Returns the port specified in `addr`.
-//
-// Aborts the progarm is the family is neither AF_INET nor AF_INET6.
-unsigned short port_from_address(struct sockaddr const *addr);

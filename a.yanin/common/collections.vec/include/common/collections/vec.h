@@ -49,7 +49,9 @@ VEC_STATIC VEC_TYPE VEC_NAME(new)(void);
 VEC_STATIC VEC_TYPE VEC_NAME(from_raw)(VEC_ELEMENT_TYPE *buf, size_t capacity, size_t len);
 VEC_STATIC common_error_code_t VEC_NAME(clone)(VEC_TYPE const *self, VEC_TYPE *result);
 VEC_STATIC void VEC_NAME(free)(VEC_TYPE *self);
+
 VEC_STATIC common_error_code_t VEC_NAME(resize)(VEC_TYPE *self, size_t new_capacity);
+
 VEC_STATIC common_error_code_t VEC_NAME(insert)(VEC_TYPE *self, size_t pos, VEC_ELEMENT_TYPE value);
 VEC_STATIC common_error_code_t VEC_NAME(push)(VEC_TYPE *self, VEC_ELEMENT_TYPE value);
 VEC_STATIC common_error_code_t VEC_NAME(append)(VEC_TYPE *self, VEC_TYPE const *other);
@@ -58,15 +60,21 @@ VEC_STATIC common_error_code_t VEC_NAME(append_slice)(
     VEC_ELEMENT_TYPE const *begin,
     size_t count
 );
+
 VEC_STATIC void VEC_NAME(remove)(VEC_TYPE *self, size_t pos);
+VEC_STATIC void VEC_NAME(remove_slice)(VEC_TYPE *self, size_t start, size_t end);
 VEC_STATIC void VEC_NAME(set_len)(VEC_TYPE *self, size_t new_len);
 VEC_STATIC void VEC_NAME(clear)(VEC_TYPE *self);
+
 VEC_STATIC VEC_ELEMENT_TYPE const *VEC_NAME(get)(VEC_TYPE const *self, size_t pos);
 VEC_STATIC VEC_ELEMENT_TYPE *VEC_NAME(get_mut)(VEC_TYPE *self, size_t pos);
+
 VEC_STATIC VEC_ELEMENT_TYPE const *VEC_NAME(as_ptr)(VEC_TYPE const *self);
 VEC_STATIC VEC_ELEMENT_TYPE *VEC_NAME(as_ptr_mut)(VEC_TYPE *self);
+
 VEC_STATIC size_t VEC_NAME(len)(VEC_TYPE const *self);
 VEC_STATIC size_t VEC_NAME(capacity)(VEC_TYPE const *self);
+
 VEC_STATIC void VEC_NAME(for_each)(VEC_TYPE *self, VEC_NAME(each_callback_t) callback);
 
 #endif // #if (VEC_CONFIG) & COLLECTION_DECLARE
@@ -261,6 +269,23 @@ VEC_STATIC void VEC_NAME(remove)(VEC_TYPE *self, size_t pos) {
         elements_to_move * sizeof(VEC_ELEMENT_TYPE)
     );
     self->len--;
+}
+
+VEC_STATIC void VEC_NAME(remove_slice)(VEC_TYPE *self, size_t start, size_t end) {
+    assert(self != NULL);
+    assert(start < end);
+
+    if (end > self->len) {
+        end = self->len;
+    }
+
+    size_t count = end - start;
+    memmove(
+        self->storage + start,
+        self->storage + start + end,
+        count
+    );
+    self->len -= count;
 }
 
 VEC_STATIC void VEC_NAME(set_len)(VEC_TYPE *self, size_t new_len) {

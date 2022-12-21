@@ -33,7 +33,6 @@ common_sources = [
   'src/main.c',
   'src/server.c',
   'src/url.c',
-  'src/util.c',
 ]
 
 st_sources = common_sources + [
@@ -44,7 +43,10 @@ mt_sources = common_sources + [
   'src/executor-mt.c',
 ]
 
-include_dirs = include_directories('src')
+include_dirs = [
+  include_directories('src'),
+  include_directories('external', is_system: true),
+]
 
 c_args = [
   '-D_POSIX_C_SOURCE=200809L',

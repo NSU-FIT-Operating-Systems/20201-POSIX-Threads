@@ -1,5 +1,7 @@
 #pragma once
 
+#include <netinet/in.h>
+
 #include <common/posix/socket.h>
 
 #include "common/loop/io.h"
@@ -173,3 +175,6 @@ void tcp_set_on_error(tcp_handler_t *self, tcp_on_error_cb_t on_error);
 
 // Retrieves the address of the remote peer.
 void tcp_address(tcp_handler_t const *self, struct sockaddr const **addr, socklen_t *len);
+
+// Stores the IP address of the remote peer in `buf` and its port in `port`.
+void tcp_remote_info(tcp_handler_t const *self, char buf[static INET6_ADDRSTRLEN], uint16_t *port);

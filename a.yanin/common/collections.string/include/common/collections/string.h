@@ -35,6 +35,9 @@ void string_remove(string_t *self, size_t pos);
 void string_pop(string_t *self);
 void string_clear(string_t *self);
 
+// Removes a substring from `start` (inclusive) to `end` (exclusive)
+void string_remove_slice(string_t *self, size_t start, size_t end);
+
 unsigned char string_get(string_t const *self, size_t pos);
 unsigned char *string_get_mut(string_t *self, size_t pos);
 unsigned char const *string_as_ptr(string_t const *self);

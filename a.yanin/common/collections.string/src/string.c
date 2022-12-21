@@ -246,6 +246,17 @@ void string_clear(string_t *self) {
     *vec_uchar_get_mut(&self->storage, 0) = '\0';
 }
 
+void string_remove_slice(string_t *self, size_t start, size_t end) {
+    assert(self != NULL);
+    assert(start <= end);
+
+    if (end > string_len(self)) {
+        end = string_len(self);
+    }
+
+    vec_uchar_remove_slice(&self->storage, start, end);
+}
+
 unsigned char string_get(string_t const *self, size_t pos) {
     assert(self != NULL);
 
