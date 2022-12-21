@@ -55,7 +55,7 @@ namespace {
     size_t port;
 
     void log(const std::string &s) {
-        std::cout << "[   LOG     ] " << s << std::endl;
+        std::cout << "[   LOG    ] " << s << std::endl;
     }
 
     void logErr(const std::string &s) {
@@ -128,7 +128,7 @@ TEST(HTTP_PROXY, SpeedIncreaseTest) {
 }
 
 TEST(HTTP_PROXY, MultipleConnectionsTest) {
-    size_t conns_count = 30;
+    size_t conns_count = 15;
     log("Launching " + std::to_string(conns_count) + " 50MB-download sessions through PROXY");
     ASSERT_FALSE(conns_count <= 0);
     auto download_segments = std::vector<download_info *>();
