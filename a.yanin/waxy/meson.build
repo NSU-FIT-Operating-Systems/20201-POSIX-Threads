@@ -35,11 +35,11 @@ common_sources = [
   'src/url.c',
 ]
 
-st_sources = common_sources + [
+st_sources = [
   'src/executor-st.c',
 ]
 
-mt_sources = common_sources + [
+mt_sources = [
   'src/executor-mt.c',
 ]
 
@@ -53,12 +53,19 @@ c_args = [
   '-D_XOPEN_SOURCE=700',
 ]
 
+waxy_common = library('waxy-common', common_sources,
+  c_args: c_args,
+  dependencies: dependencies,
+  include_directories: include_dirs)
+
 executable('waxy-st', st_sources,
   c_args: c_args,
   include_directories: include_dirs,
+  link_with: waxy_common,
   dependencies: st_dependencies)
 
 executable('waxy-mt', mt_sources,
   c_args: c_args,
   include_directories: include_dirs,
+  link_with: waxy_common,
   dependencies: mt_dependencies)
