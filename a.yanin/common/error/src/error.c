@@ -35,6 +35,7 @@ void error_assert(error_t *self) {
     if (self == NULL) return;
 
     error_log_free(&self, LOG_ERR, ERROR_VERBOSITY_SOURCE_CHAIN | ERROR_VERBOSITY_BACKTRACE);
+    log_abort("Aborting due to the error above");
 }
 
 typedef struct {

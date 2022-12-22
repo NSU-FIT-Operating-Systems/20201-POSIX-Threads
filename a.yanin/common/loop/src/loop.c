@@ -138,6 +138,7 @@ error_t *loop_register(loop_t *self, handler_t *handler) {
     assert_mutex_lock(&self->pending_mtx);
 
     error_t *err = NULL;
+    bool pushed = false;
 
     arc_handler_t *arc = arc_handler_new(handler);
     err = OK_IF(arc != NULL);
@@ -147,10 +148,15 @@ error_t *loop_register(loop_t *self, handler_t *handler) {
         "Could not insert the handle in the pending queue",
         error_from_common(
             vec_handler_push(&self->pending_handlers, arc)));
+    pushed = true;
     if (err) goto fail;
 
 fail:
     assert_mutex_unlock(&self->pending_mtx);
+
+    if (pushed) {
+        loop_interrupt(self);
+    }
 
     return err;
 }
@@ -268,18 +274,24 @@ static error_t *loop_prepare_pollfd(
     }
 
     for (size_t i = 0; i < vec_handler_len(&self->handlers); ++i) {
-        arc_handler_t *handler = *vec_handler_get(&self->handlers, i);
+        arc_handler_t *arc = *vec_handler_get(&self->handlers, i);
+        handler_t *handler = arc_handler_get(arc);
+        loop_handler_status_t status = handler->status;
 
-        if (arc_handler_get(handler)->status != LOOP_HANDLER_READY) {
+        if (status == LOOP_HANDLER_UNREGISTERED) {
             continue;
         }
 
-        err = loop_prepare_pollfd_process_handler(self, pollfd, meta, handler, has_forced_handlers);
-        if (err) goto fail;
-
-        if (!arc_handler_get(handler)->passive) {
+        if (!handler->passive) {
             *empty = false;
         }
+
+        if (status == LOOP_HANDLER_QUEUED) {
+            continue;
+        }
+
+        err = loop_prepare_pollfd_process_handler(self, pollfd, meta, arc, has_forced_handlers);
+        if (err) goto fail;
     }
 
 fail:
@@ -372,6 +384,7 @@ static error_t *loop_handler_task_cb(task_ctx_t *ctx) {
         &(loop_handler_status_t) { LOOP_HANDLER_QUEUED },
         LOOP_HANDLER_READY
     );
+    loop_interrupt(ctx->loop);
     arc_handler_free(ctx->handler);
     free(ctx);
 
