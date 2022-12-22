@@ -64,13 +64,26 @@ typedef error_t *(*tcp_on_read_error_cb_t)(
 );
 
 // Called whenever a handler has successfully finished writing data to the socket.
-typedef error_t *(*tcp_on_write_cb_t)(loop_t *loop, tcp_handler_t *handler);
+//
+// The `slice_count` and `slices` parameters has supplied with the values passed to the write
+// request.
+typedef error_t *(*tcp_on_write_cb_t)(
+    loop_t *loop,
+    tcp_handler_t *handler,
+    size_t slice_count,
+    slice_t const slices[static slice_count]
+);
 
 // Called whenever a handler has encountered a failure writing data to the socket.
+//
+// The `slice_count` and `slices` parameters has supplied with the values passed to the write
+// request.
 typedef error_t *(*tcp_on_write_error_cb_t)(
     loop_t *loop,
     tcp_handler_t *handler,
     error_t *err,
+    size_t slice_count,
+    slice_t const slices[static slice_count],
     size_t written_count
 );
 

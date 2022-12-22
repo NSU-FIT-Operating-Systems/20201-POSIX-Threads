@@ -121,18 +121,6 @@ void loop_free(loop_t *self);
 // The ownership over the handler is transferred to the loop.
 error_t *loop_register(loop_t *self, handler_t *handler);
 
-// Unregisters a handler from the loop.
-//
-// If this is called during an iteration of the loop, its unregistration is
-// deferred until the end of the iteration.
-// If if had any pending events, the handle will still process them during the
-// iteration.
-//
-// When the handler is unregistered, it is freed and cannot be used afterwards.
-//
-// The handler must have been registered in the loop prior to this call.
-void loop_unregister(loop_t *self, handler_t *handler);
-
 // Starts the loop.
 //
 // The loop is run until it has no registered handlers or is aborted by
@@ -159,6 +147,18 @@ void handler_init(handler_t *self, handler_vtable_t const *vtable, int fd);
 //
 // Also dispatches to the `free` method in the handle vtable.
 void handler_free(handler_t *self);
+
+// Unregisters a handler from a loop.
+//
+// If this is called during an iteration of the loop, its unregistration is
+// deferred until the end of the iteration.
+// If if had any pending events, the handle will still process them during the
+// iteration.
+//
+// When the handler is unregistered, it is freed and cannot be used afterwards.
+//
+// The handler must have been registered in the loop prior to this call.
+void handler_unregister(handler_t *handler);
 
 // Returns the current event mask.
 //

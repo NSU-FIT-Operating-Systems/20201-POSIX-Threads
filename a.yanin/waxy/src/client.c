@@ -16,15 +16,35 @@ enum {
     MAX_HEADERS = 512,
     // have you ever seen an HTTP GET request larger than 16 MiB? me neither.
     MAX_REQUEST_SIZE = 16 * 1024 * 1024,
+    CACHE_BUFFER_SIZE = 4 * 1024 * 1024,
 };
 
-typedef struct client_ctx {
+// This struct is owned by the TCP handler (`tcp`).
+// A reference to it is kept as the custom data of `rd`.
+// While it's being referenced, no field is mutated, and concurrent reads are fine™.
+//
+// An invariant must be ensured: the TCP handler is alive and registered while so is `cache_rd_t`.
+typedef struct {
     cache_t *cache;
     string_t buf;
     struct phr_header *headers;
+    tcp_handler_t *tcp;
+    cache_rd_t *rd;
 } client_ctx_t;
 
-static char const bad_request_response[] =
+typedef struct {
+    client_ctx_t *ctx;
+    loop_t *loop;
+} client_cache_ctx_t;
+
+typedef struct {
+    // the slice actually points to `buf`
+    slice_t slice;
+    bool eof;
+    char buf[CACHE_BUFFER_SIZE];
+} cache_buf_t;
+
+static char const bad_request[] =
     "HTTP/1.1 400 Bad Request\r\n"
     SERVER_HEADER
     "Connection: close\r\n"
@@ -32,17 +52,231 @@ static char const bad_request_response[] =
     "Content-Length: 17\r\n"
     "\r\n"
     "400 Bad Request\r\n";
+static char const method_not_allowed[] =
+    "HTTP/1.1 405 Method Not Allowed\r\n"
+    SERVER_HEADER
+    "Connection: close\r\n"
+    "Content-Type: text/plain\r\n"
+    "Content-Length: 24\r\n"
+    "\r\n"
+    "405 Method Not Allowed\r\n";
 
-static slice_t bad_request_response_slice = {
-    .base = bad_request_response,
-    .len = sizeof(bad_request_response),
+static slice_t const bad_request_slice = {
+    .base = bad_request,
+    .len = sizeof(bad_request),
+};
+static slice_t const method_not_allowed_slice = {
+    .base = method_not_allowed,
+    .len = sizeof(method_not_allowed),
 };
 
-error_t *client_on_bad_req_write(loop_t *loop, tcp_handler_t *handler) {
-    loop_unregister(loop, (handler_t *) handler);
-    client_free_ctx(handler);
+static void client_free_ctx_internal(tcp_handler_t *handler, bool lock_rd);
+
+error_t *client_on_req_err_write(
+    loop_t *,
+    tcp_handler_t *handler,
+    size_t slice_count,
+    slice_t const[static slice_count]
+) {
+    handler_unregister((handler_t *) handler);
+    client_free_ctx_internal(handler, true);
 
     return NULL;
+}
+
+error_t *client_cache_on_write(
+    loop_t *,
+    tcp_handler_t *,
+    size_t slice_count,
+    slice_t const slices[static slice_count]
+) {
+    assert(slice_count == 1);
+
+    // `slices` here is actually a pointer to the `slice` field of `cache_buf_t`.
+    // Thus we derive the pointer to the whole allocation.
+    // The pointers here point to the same allocation, so if you're a fan of pointer provenance (and
+    // you better be!), it's all totally legal.
+    // *And* we can cast away the constness because the pointer we initially obtained was not const
+    // to begin with.
+    cache_buf_t *buf = (cache_buf_t *)((char *) slices - offsetof(cache_buf_t, slice));
+    free(buf);
+
+    return NULL;
+}
+
+error_t *client_cache_on_write_error(
+    loop_t *,
+    tcp_handler_t *,
+    error_t *err,
+    size_t slice_count,
+    slice_t const slices[static slice_count],
+    size_t
+) {
+    assert(slice_count == 1);
+    // the base pointer was dervied from a non-const pointer
+    free((char *) slices[0].base);
+
+    // the tcp handler's generic error handler will free everything
+    return err;
+}
+
+error_t *client_cache_on_read(cache_rd_t *rd, loop_t *) {
+    error_t *err = NULL;
+
+    client_ctx_t *ctx = handler_custom_data((handler_t *) rd);
+
+    if (ctx == NULL) {
+        // the TCP client has been unregistered
+        handler_unregister((handler_t *) rd);
+
+        return err;
+    }
+
+    cache_buf_t *buf = malloc(sizeof(cache_buf_t));
+    err = error_wrap("Could not allocate a buffer", OK_IF(buf != NULL));
+    if (err) goto malloc_fail;
+
+    buf->slice = (slice_t) {
+        .base = buf->buf,
+        .len = 0,
+    };
+
+    size_t count = cache_rd_read(rd, buf->buf, CACHE_BUFFER_SIZE, &buf->eof);
+    buf->slice.len = count;
+
+    // we don't care about our poll flags, so unlocking is safe,
+    // and this ensures that the TCP handler's lock is always acquired before the rd's,
+    // avoiding deadlocks!
+    handler_unlock((handler_t *) rd);
+    handler_lock((handler_t *) ctx->tcp);
+
+    err = tcp_write(ctx->tcp, 1, &buf->slice,
+        client_cache_on_write, client_cache_on_write_error);
+
+    handler_unlock((handler_t *) ctx->tcp);
+    handler_lock((handler_t *) rd);
+
+    if (err) goto write_fail;
+
+    return err;
+
+write_fail:
+    free(buf);
+
+malloc_fail:
+    // TODO: this must also be done in the write callback
+    // FIXME: use an arc for tossing the context around (prevents double-free if the two handles
+    // fail concurrently)
+
+    // we're going to fail, so wrap up the party
+    // (see the comment above that explains the lock shenanigans)
+    handler_unlock((handler_t *) rd);
+    handler_lock((handler_t *) ctx->tcp);
+
+    client_free_ctx_internal(ctx->tcp, true);
+    handler_unregister((handler_t *) ctx->tcp);
+
+    handler_unlock((handler_t *) ctx->tcp);
+    handler_lock((handler_t *) rd);
+
+    // failing here would abort the whole program
+    // that we must not do, for this is but a mere client, one of the many of its kind
+    error_log_free(&err, LOG_ERR, ERROR_VERBOSITY_BACKTRACE | ERROR_VERBOSITY_SOURCE_CHAIN);
+
+    return err;
+}
+
+error_t *client_cache_on_update(cache_rd_t *rd, loop_t *, cache_entry_state_t state) {
+    error_t *err = NULL;
+
+    client_ctx_t *ctx = handler_custom_data((handler_t *) rd);
+
+    if (ctx == NULL) {
+        handler_unregister((handler_t *) rd);
+
+        return err;
+    }
+
+    char ip[INET6_ADDRSTRLEN] = {0};
+    uint16_t port = 0;
+    tcp_remote_info(ctx->tcp, ip, &port);
+
+    switch (state) {
+    case CACHE_ENTRY_INVALID:
+        log_printf(
+            LOG_WARN,
+            "The cache entry the client %s:%u was reading from has been invalidated; dropping the connection",
+            ip, port
+        );
+        // TODO: unregister everyone involved
+        return err;
+
+    case CACHE_ENTRY_PARTIAL:
+        // not that this can ever happen
+        return err;
+
+    case CACHE_ENTRY_COMPLETE:
+        // if we get this event, we'll (or, actually, we do already) have the read callback invoked
+        // with eof set to true, so we don't need to do any special handling
+        return err;
+    }
+
+    abort();
+}
+
+// TODO: make all the functions here static except those declared in the header
+static error_t *client_launch_cache_rd(client_cache_ctx_t *cache_ctx, cache_rd_t *rd) {
+    error_t *err = NULL;
+
+    client_ctx_t *ctx = cache_ctx->ctx;
+    loop_t *loop = cache_ctx->loop;
+
+    ctx->rd = rd;
+
+    handler_set_custom_data((handler_t *) rd, ctx);
+    cache_rd_set_on_read(rd, client_cache_on_read);
+    cache_rd_set_on_update(rd, client_cache_on_update);
+    err = loop_register(loop, (handler_t *) rd);
+
+    return err;
+}
+
+error_t *client_on_cache_hit(void *data, cache_rd_t *rd) {
+    error_t *err = NULL;
+
+    client_cache_ctx_t *cache_ctx = data;
+    err = client_launch_cache_rd(cache_ctx, rd);
+    if (err) goto fail;
+
+    char ip[INET6_ADDRSTRLEN] = {0};
+    uint16_t port = 0;
+    tcp_remote_info(cache_ctx->ctx->tcp, ip, &port);
+    log_printf(LOG_DEBUG, "Fetched an entry from the cache for %s:%u", ip, port);
+
+fail:
+    return err;
+}
+
+error_t *client_on_cache_miss(void *data, cache_rd_t *rd, cache_wr_t *wr) {
+    error_t *err = NULL;
+
+    client_cache_ctx_t *cache_ctx = data;
+    err = client_launch_cache_rd(cache_ctx, rd);
+    if (err) goto rd_launch_fail;
+
+    // TODO: request the resource from the upstream server
+
+    char ip[INET6_ADDRSTRLEN] = {0};
+    uint16_t port = 0;
+    tcp_remote_info(cache_ctx->ctx->tcp, ip, &port);
+    log_printf(
+        LOG_DEBUG,
+        "The resource the client %s:%u has requested was not present in the cache",
+        ip, port
+    );
+
+rd_launch_fail:
+    return err;
 }
 
 error_t *client_process_request(
@@ -52,9 +286,73 @@ error_t *client_process_request(
     slice_t method,
     slice_t path,
     int minor_version,
-    size_t num_headers
+    bool *unregister
 ) {
-    TODO("process the request");
+    error_t *err = NULL;
+    *unregister = true;
+
+    char ip[INET6_ADDRSTRLEN] = {0};
+    uint16_t port = 0;
+    tcp_remote_info(handler, ip, &port);
+
+    if (minor_version != 0 && minor_version != 1) {
+        log_printf(
+            LOG_WARN,
+            "A client %s:%u has sent a request with an unsupported HTTP version 1.%d",
+            ip, port,
+            minor_version
+        );
+
+        goto fail;
+    }
+
+    if (slice_cmp(method, slice_from_cstr("GET")) != 0) {
+        log_printf(
+            LOG_WARN,
+            "A client %s:%u has sent a request with an unsupported method %.*s",
+            ip, port,
+            (int) method.len, method.base
+        );
+        err = error_wrap("Could not sent an error response",
+            tcp_write(handler, 1, &method_not_allowed_slice, client_on_req_err_write, NULL));
+
+        if (err) goto fail;
+    }
+
+    url_t url = {0};
+    err = url_parse(path, &url);
+
+    if (!err) {
+        err = error_wrap("Unsupported scheme", OK_IF(
+            slice_cmp(url.scheme, slice_from_cstr("http"))));
+    }
+
+    if (!err) {
+        err = error_wrap("The hostname is not specified", OK_IF(!url.host_null));
+    }
+
+    if (!err) {
+        if (url.port_null) {
+            url.port = 80;
+            url.port_null = false;
+        }
+    }
+
+    if (err) {
+        log_printf(LOG_WARN, "A client %s:%u has sent an invalid URL", ip, port);
+        error_log_free(&err, LOG_WARN, ERROR_VERBOSITY_SOURCE_CHAIN);
+
+        goto fail;
+    }
+
+    client_cache_ctx_t cache_ctx = {
+        .ctx = ctx,
+        .loop = loop,
+    };
+    err = cache_fetch(ctx->cache, &url, client_on_cache_hit, client_on_cache_miss, &cache_ctx);
+
+fail:
+    return err;
 }
 
 static error_t *client_handle_http_request(
@@ -69,6 +367,7 @@ static error_t *client_handle_http_request(
     char ip[INET6_ADDRSTRLEN] = {0};
     uint16_t port = 0;
     tcp_remote_info(handler, ip, &port);
+    bool unregister = false;
 
     if (string_len(&ctx->buf) > MAX_REQUEST_SIZE) {
         log_printf(
@@ -78,10 +377,9 @@ static error_t *client_handle_http_request(
             port,
             string_len(&ctx->buf)
         );
-        loop_unregister(loop, (handler_t *) handler);
-        client_free_ctx(handler);
+        unregister = true;
 
-        return err;
+        goto fail;
     }
 
     slice_t method = slice_empty();
@@ -104,6 +402,7 @@ static error_t *client_handle_http_request(
     if (count == -2) {
         if (eof) {
             log_printf(LOG_WARN, "A client %s:%u has sent a truncated request", ip, port);
+            unregister = true;
 
             goto fail;
         }
@@ -114,44 +413,44 @@ static error_t *client_handle_http_request(
         // failure
         log_printf(LOG_WARN, "A client %s:%u has sent an invalid request", ip, port);
         err = error_wrap("Could not send a bad request response",
-            tcp_write(handler, 1, &bad_request_response_slice, client_on_bad_req_write, NULL));
+            tcp_write(handler, 1, &bad_request_slice, client_on_req_err_write, NULL));
 
         if (err) {
             error_log_free(&err, LOG_ERR, ERROR_VERBOSITY_SOURCE_CHAIN | ERROR_VERBOSITY_BACKTRACE);
-
-            goto fail;
+            unregister = true;
         }
 
-        return err;
+        goto fail;
     }
 
     assert(count >= 0);
-    err = client_process_request(ctx, loop, handler, method, path, minor_version, num_headers);
+    tcp_read(handler, NULL, NULL);
+    tcp_shutdown_input(handler);
+    err = client_process_request(
+        ctx, loop, handler,
+        method, path,
+        minor_version,
+        &unregister
+    );
     if (err) goto fail;
 
-    string_remove_slice(&ctx->buf, 0, count);
-
-    if (tcp_is_eof(handler)) {
-        log_printf(LOG_DEBUG, "A client %s:%u has closed the connections", ip, port);
-    }
-
-    return err;
-
 fail:
-    loop_unregister(loop, (handler_t *) handler);
-    client_free_ctx(handler);
+    if (unregister) {
+        handler_unregister((handler_t *) handler);
+        client_free_ctx_internal(handler, true);
+    }
 
     return err;
 }
 
-static error_t *client_on_error(loop_t *loop, tcp_handler_t *handler, error_t *err) {
+static error_t *client_on_error(loop_t *, tcp_handler_t *handler, error_t *err) {
     char ip[INET6_ADDRSTRLEN] = {0};
     uint16_t port = 0;
     tcp_remote_info(handler, ip, &port);
     log_printf(LOG_ERR, "An error has occured while processing a client %s:%u", ip, port);
     error_log_free(&err, LOG_ERR, ERROR_VERBOSITY_BACKTRACE | ERROR_VERBOSITY_SOURCE_CHAIN);
-    loop_unregister(loop, (handler_t *) handler);
-    client_free_ctx(handler);
+    handler_unregister((handler_t *) handler);
+    client_free_ctx_internal(handler, true);
 
     return err;
 }
@@ -191,6 +490,8 @@ error_t *client_init(tcp_handler_t *handler, cache_t *cache) {
     err = error_wrap("Could not allocate a buffer", error_from_common(string_new(&ctx->buf)));
     if (err) goto string_new_fail;
 
+    ctx->tcp = handler;
+    ctx->rd = NULL;
     handler_set_custom_data((handler_t *) handler, ctx);
     tcp_set_on_error(handler, client_on_error);
     tcp_read(handler, client_on_read, NULL);
@@ -207,9 +508,33 @@ ctx_calloc_fail:
     return err;
 }
 
+static void client_free_ctx_internal(tcp_handler_t *handler, bool lock_rd) {
+    client_ctx_t *ctx = handler_custom_data((handler_t *) handler);
+
+    if (ctx->rd) {
+        handler_t *rd = (handler_t *) ctx->rd;
+
+        if (lock_rd) {
+            handler_lock(rd);
+        }
+
+        handler_set_custom_data(rd, NULL);
+        handler_unregister(rd);
+
+        ctx->rd = NULL;
+
+        if (lock_rd) {
+            handler_unlock(rd);
+        }
+    }
+
+    string_free(&ctx->buf);
+    free(ctx->headers);
+    free(ctx);
+    handler_set_custom_data((handler_t *) handler, NULL);
+}
+
 // TODO: better to hook this to the handler's free method
 void client_free_ctx(tcp_handler_t *handler) {
-    client_ctx_t *ctx = handler_custom_data((handler_t *) handler);
-    string_free(&ctx->buf);
-    free(ctx);
+    client_free_ctx_internal(handler, true);
 }

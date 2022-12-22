@@ -378,7 +378,7 @@ static error_t *rd_process(cache_rd_t *self, loop_t *loop, poll_flags_t) {
 
     assert_mutex_unlock(&entry->mtx);
 
-    if (new_len > self->count) {
+    if (new_len > self->count || (state != self->last_state && state == CACHE_ENTRY_COMPLETE)) {
         err = self->on_read(self, loop);
         if (err) return err;
 
@@ -516,7 +516,7 @@ size_t cache_rd_read(cache_rd_t *self, char *buf, size_t size, bool *eof) {
     memcpy(buf, string_as_cptr(&entry->buf) + self->count, unread_count);
     self->count += unread_count;
 
-    if (entry->state == CACHE_ENTRY_COMPLETE) {
+    if (entry->state != CACHE_ENTRY_PARTIAL) {
         *eof = true;
     }
 

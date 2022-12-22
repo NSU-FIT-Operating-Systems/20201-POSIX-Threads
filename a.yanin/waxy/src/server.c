@@ -44,7 +44,7 @@ static error_t *server_on_fail(loop_t *loop, tcp_handler_server_t *serv, error_t
             goto fail;
         }
 
-        loop_unregister(loop, (handler_t *) serv);
+        handler_unregister((handler_t *) serv);
         serv_new_err = loop_register(loop, (handler_t *) new_serv);
 
         if (serv_new_err) {

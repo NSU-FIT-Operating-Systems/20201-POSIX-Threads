@@ -125,11 +125,15 @@ bool url_eq(url_t const *lhs, url_t const *rhs) {
         slice_cmp(lhs->scheme, rhs->scheme) == 0 &&
         slice_cmp(lhs->username, rhs->username) == 0 &&
         slice_cmp(lhs->password, rhs->password) == 0 &&
-        slice_cmp(lhs->host, rhs->host) == 0 &&
-        lhs->port == rhs->port &&
+        lhs->host_null == rhs->host_null &&
+        (lhs->host_null || slice_cmp(lhs->host, rhs->host) == 0) &&
+        lhs->port_null == rhs->port_null &&
+        (lhs->port_null || lhs->port == rhs->port) &&
         slice_cmp(lhs->path, rhs->path) == 0 &&
-        slice_cmp(lhs->query, rhs->query) == 0 &&
-        slice_cmp(lhs->fragment, rhs->fragment) == 0
+        lhs->query_null == rhs->query_null &&
+        (lhs->query_null || slice_cmp(lhs->query, rhs->query) == 0) &&
+        lhs->fragment_null == rhs->fragment_null &&
+        (lhs->fragment_null || slice_cmp(lhs->fragment, rhs->fragment) == 0)
     );
 }
 

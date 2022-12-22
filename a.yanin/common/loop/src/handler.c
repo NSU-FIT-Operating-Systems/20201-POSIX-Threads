@@ -38,6 +38,10 @@ void handler_free(handler_t *self) {
     free(self);
 }
 
+void handler_unregister(handler_t *handler) {
+    handler->status = LOOP_HANDLER_UNREGISTERED;
+}
+
 poll_flags_t handler_current_mask(handler_t const *self) {
     return self->current_flags;
 }

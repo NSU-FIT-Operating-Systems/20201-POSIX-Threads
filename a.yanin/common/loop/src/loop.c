@@ -161,10 +161,6 @@ fail:
     return err;
 }
 
-void loop_unregister(loop_t *, handler_t *handler) {
-    handler->status = LOOP_HANDLER_UNREGISTERED;
-}
-
 static error_t *loop_process_registrations(loop_t *self) {
     error_t *err = NULL;
 

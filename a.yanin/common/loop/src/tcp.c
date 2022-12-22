@@ -331,7 +331,7 @@ static error_t *tcp_client_process_write_req_on_write(
     tcp_write_req_t *tcp_req = (tcp_write_req_t *) req;
 
     if (tcp_req->on_write != NULL) {
-        return tcp_req->on_write(loop, self);
+        return tcp_req->on_write(loop, self, req->slice_count, req->slices);
     } else {
         return NULL;
     }
@@ -347,7 +347,8 @@ static error_t *tcp_client_process_write_req_on_error(
     tcp_write_req_t *tcp_req = (tcp_write_req_t *) req;
 
     if (tcp_req->on_error != NULL) {
-        return tcp_req->on_error(loop, self, err, req->written_count);
+        return tcp_req->on_error(loop, self, err,
+            req->slice_count, req->slices, req->written_count);
     } else {
         return err;
     }
@@ -378,7 +379,10 @@ static error_t *tcp_client_drop_write_reqs(tcp_handler_t *self, loop_t *loop) {
         tcp_write_req_t const *req = vec_wrreq_get(&self->write_reqs, i);
 
         if (req->on_error != NULL) {
-            err = error_combine(err, req->on_error(loop, self, NULL, req->write_req.written_count));
+            err = error_combine(err, req->on_error(loop, self, NULL,
+                req->write_req.slice_count,
+                req->write_req.slices,
+                req->write_req.written_count));
         }
     }
 
