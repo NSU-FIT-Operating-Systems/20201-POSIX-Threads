@@ -132,9 +132,11 @@ error_t *loop_register(loop_t *self, handler_t *handler);
 // handler.
 error_t *loop_run(loop_t *self);
 
-// Unregisters all the handlers from the loop.
+// Unregisters all the handlers from the loop and interrupts the loop.
 //
 // See `loop_unregister`.
+//
+// This function is async-signal-safe.
 void loop_stop(loop_t *self);
 
 // Forcibly interrupts the next (or the current) iteration of the loop.

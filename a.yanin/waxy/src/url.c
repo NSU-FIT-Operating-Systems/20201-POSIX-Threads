@@ -1056,6 +1056,8 @@ error_t *url_parse(slice_t slice, url_t *result) {
         case STATE_FAIL:
             goto parser_fail;
         }
+
+        ++parser.pos;
     } while (!is_eof(&parser));
 
     *result = url;

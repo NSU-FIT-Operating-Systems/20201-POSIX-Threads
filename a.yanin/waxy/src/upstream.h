@@ -46,8 +46,6 @@ static slice_t const request_slices[] = {
 static void upstream_ctx_free(handler_t *data) {
     upstream_ctx_t *ctx = handler_custom_data(data);
 
-    TODO("free everything, do the right thing");
-
     // freeing the string twice is ok
     string_free(&ctx->buf);
     // the headers are set to `NULL` after they are freed
@@ -66,7 +64,6 @@ static error_t *upstream_on_error(
     tcp_handler_t *handler,
     error_t *err
 ) {
-    TODO("unregister ourselves, log the failure");
     char ip[INET6_ADDRSTRLEN] = {0};
     uint16_t port = 0;
     tcp_remote_info(handler, ip, &port);

@@ -22,6 +22,17 @@ error_t *notify_new(notify_t **result);
 // `self` must have already been registered in the loop.
 bool notify_post(notify_t *self);
 
+// Wakes up the instance of `notify_t` unconditionally.
+//
+// This triggers an event on the associated fd, but does not post any notification, meaning the
+// callback will not be invoked.
+// The ordering between posted-notification wakeups and unconditional wakeups is unspecified.
+// If multiple unconditional wakeups are requested, some of them may be dropped.
+// The instance will be woken up at least once, however.
+//
+// This method is async-signal-safe.
+void notify_wakeup(notify_t *self);
+
 // Sets the notification callback.
 //
 // If `on_notified` is `NULL` (the default value), no notification will be processed.

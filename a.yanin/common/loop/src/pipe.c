@@ -210,7 +210,6 @@ error_t *pipe_handler_new(pipe_handler_wr_t **writer, pipe_handler_rd_t **reader
     err = error_from_posix(wrapper_pipe(&rd_fd, &wr_fd));
     if (err) goto pipe_fail;
 
-    TODO("make fds non-blocking");
     err = error_wrap("Could not switch the read end to non-blocking mode", error_from_posix(
         wrapper_fcntli(rd_fd, F_SETFL, O_NONBLOCK)));
     if (err) goto fcntli_fail;

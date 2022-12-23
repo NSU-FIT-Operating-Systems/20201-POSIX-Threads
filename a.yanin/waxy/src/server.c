@@ -209,7 +209,6 @@ executor_new_fail:
 
 void server_stop(server_t *self) {
     loop_stop(self->loop);
-    loop_interrupt(self->loop);
 }
 
 void server_free(server_t *self) {

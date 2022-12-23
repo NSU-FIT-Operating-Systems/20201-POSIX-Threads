@@ -40,8 +40,7 @@ static error_t *notify_process(notify_t *self, loop_t *loop, poll_flags_t flags)
     assert_mutex_lock(&self->mtx);
     bool was_raised = self->raised;
 
-    if (was_raised) {
-        assert(flags & LOOP_READ);
+    if (flags & LOOP_READ) {
         char buf = 0;
         ssize_t read_count = -1;
 
@@ -59,9 +58,8 @@ static error_t *notify_process(notify_t *self, loop_t *loop, poll_flags_t flags)
 
     if (err) goto read_fail;
 
-    if (was_raised) {
+    if (was_raised && self->on_notified) {
         err = self->on_notified(loop, self);
-
         if (err) goto cb_fail;
     }
 
@@ -125,14 +123,28 @@ bool notify_post(notify_t *self) {
 
     if (!was_raised) {
         ssize_t written_count = -1;
-        error_assert(error_from_posix(wrapper_write(self->wr_fd, "1", 1, &written_count)));
-        error_assert(OK_IF(written_count == 1));
+        posix_err_t status = wrapper_write(self->wr_fd, "1", 1, &written_count);
+
+        if (status.errno_code != EWOULDBLOCK && status.errno_code != EAGAIN) {
+            error_assert(error_from_posix(status));
+            error_assert(OK_IF(written_count == 1));
+        }
     }
 
     self->raised = true;
     assert_mutex_unlock(&self->mtx);
 
     return !was_raised;
+}
+
+void notify_wakeup(notify_t *self) {
+    ssize_t written_count = -1;
+    posix_err_t status = wrapper_write(self->wr_fd, "1", 1, &written_count);
+
+    if (status.errno_code != EWOULDBLOCK && status.errno_code != EAGAIN) {
+        error_assert(error_from_posix(status));
+        error_assert(OK_IF(written_count == 1));
+    }
 }
 
 void notify_set_cb(notify_t *self, notify_cb_t on_notified) {

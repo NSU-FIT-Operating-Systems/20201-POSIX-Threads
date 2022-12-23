@@ -3,6 +3,12 @@ project('waxy', 'c',
 
 common_modules = subproject('common', default_options: ['default_library=static']).get_variable('modules')
 
+picohttpparser = declare_dependency(
+  include_directories: 'external',
+  link_with: library('picohttpparser', 'external/picohttpparser/picohttpparser.c',
+    include_directories: 'external/picohttpparser'),
+)
+
 dependencies = [
   common_modules['collections.dlist'],
   common_modules['collections.hash'],
@@ -15,6 +21,7 @@ dependencies = [
   common_modules['memory.arc'],
   common_modules['posix'],
   common_modules['posix.adapter'],
+  picohttpparser,
   dependency('threads'),
 ]
 
