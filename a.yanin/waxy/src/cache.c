@@ -166,6 +166,7 @@ void cache_free(cache_t *self) {
 
     dlist_entry_free(&self->entries);
     error_assert(error_from_errno(pthread_mutex_destroy(&self->mtx)));
+    free(self);
 }
 
 static error_t *cache_entry_new_rd(arc_entry_t *arc, cache_rd_t **result);

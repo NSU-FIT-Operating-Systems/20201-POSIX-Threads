@@ -21,12 +21,12 @@ typedef enum {
     SERVER_STATE_LISTEN,
 } server_state_t;
 
-typedef struct server_ctx {
+struct server_ctx {
     server_t *self;
     struct addrinfo *addr_head;
     struct addrinfo *next_addr;
     server_state_t state;
-} server_ctx_t;
+};
 
 static error_t *server_new_tcp_serv(server_ctx_t *ctx, tcp_handler_server_t **result);
 
@@ -70,6 +70,8 @@ static error_t *server_on_new_conn(loop_t *loop, tcp_handler_server_t *serv) {
 
     server_ctx_t *ctx = handler_custom_data((handler_t *) serv);
     ctx->state = SERVER_STATE_LISTEN;
+    freeaddrinfo(ctx->addr_head);
+    ctx->addr_head = NULL;
 
     tcp_handler_t *handler = NULL;
     err = error_wrap("Could not accept a connection", tcp_accept(serv, &handler));
@@ -215,6 +217,11 @@ void server_free(server_t *self) {
     loop_free(self->loop);
     executor_free(self->executor);
     cache_free(self->cache);
+
+    if (self->ctx->addr_head != NULL) {
+        freeaddrinfo(self->ctx->addr_head);
+    }
+
     free(self->ctx);
 }
 

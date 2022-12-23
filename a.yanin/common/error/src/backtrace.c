@@ -54,12 +54,14 @@ static int backtrace_on_captured(
     *data->outermost = frame;
     *frame = (backtrace_t) {
         .pc = pc,
-        .file = strdup(file),
+        .file = file == NULL ? NULL : strdup(file),
         .lineno = lineno,
-        .func = strdup(func),
+        .func = func == NULL ? NULL : strdup(func),
     };
 
     data->outermost = &frame->parent;
+
+    return 0;
 
 fail:
     data->success = false;
@@ -85,7 +87,9 @@ backtrace_t *backtrace_capture(void) {
     backtrace_full(backtrace_state, 0, backtrace_on_captured, backtrace_on_fail, &data);
 
     if (!data.success) {
+        log_printf(LOG_DEBUG, "Capturing the stacktrace failed");
         backtrace_free(&root);
+        root = NULL;
     }
 
     return root;

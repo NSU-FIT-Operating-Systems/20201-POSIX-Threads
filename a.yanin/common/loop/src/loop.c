@@ -58,6 +58,10 @@ struct loop {
     atomic_bool stopped;
 };
 
+error_t *loop_on_notified(loop_t *, notify_t *) {
+    return NULL;
+}
+
 error_t *loop_new(executor_t *executor, loop_t **result) {
     error_t *err = NULL;
 
@@ -73,6 +77,10 @@ error_t *loop_new(executor_t *executor, loop_t **result) {
 
     err = error_wrap("Could not initialize the notification mechanism", notify_new(&self->notify));
     if (err) goto notify_fail;
+
+    // even though we don't need to do anything when notified,
+    // we have to set the callback to set LOOP_READ on `self->notify`
+    notify_set_cb(self->notify, loop_on_notified);
 
     ((handler_t *) self->notify)->passive = true;
     arc_handler_t *notify = arc_handler_new((handler_t *) self->notify);
@@ -127,6 +135,8 @@ void loop_free(loop_t *self) {
     }
 
     vec_handler_free(&self->handlers);
+
+    free(self);
 }
 
 error_t *loop_register(loop_t *self, handler_t *handler) {
@@ -515,6 +525,7 @@ fail:
 }
 
 void loop_stop(loop_t *self) {
+    log_printf(LOG_INFO, "Stopping the loop on request");
     self->stopped = true;
     notify_wakeup(self->notify);
 }

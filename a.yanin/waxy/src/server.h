@@ -6,12 +6,14 @@
 #include "cache.h"
 #include "executor.h"
 
+typedef struct server_ctx server_ctx_t;
+
 // Listens on a socket for client connections.
 typedef struct server {
     loop_t *loop;
     executor_t *executor;
     cache_t *cache;
-    void *ctx;
+    server_ctx_t *ctx;
 } server_t;
 
 error_t *server_new(char const *port, size_t cache_size, server_t *result);

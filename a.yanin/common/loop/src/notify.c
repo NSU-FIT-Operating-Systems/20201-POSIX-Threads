@@ -109,6 +109,8 @@ error_t *notify_new(notify_t **result) {
 
     *result = self;
 
+    return err;
+
 fcntli_fail:
 pipe_fail:
     free(self);
