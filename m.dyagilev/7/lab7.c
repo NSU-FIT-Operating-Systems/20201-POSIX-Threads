@@ -13,13 +13,15 @@
 #include <fcntl.h>
 #include <stdbool.h>
 
-#include "opendir_with_retry.h"
-#include "copy_tasks_queue.h"
+#include "open_with_retry.h"
+#include "append_name_to_path.h"
+#include "copy_task.h"
+#include "queue.h"
 
 enum ERRORS {
 	MISSING_ARGUMENT = 1,
 	MEMORY_ALLOCATION_ERROR,
-	OPENDIR_ERROR,
+	FDOPENDIR_ERROR,
 	RIGHTS_ERROR,
 	MKDIR_ERROR,
 	STAT_ERROR,
@@ -29,6 +31,8 @@ enum ERRORS {
 	READ_ERROR,
 	WRITE_ERROR,
 	QUEUE_ERROR,
+	DIR_READING_ERROR,
+	ATTR_SETTING_ERROR,
 	TASK_ERROR,
 };
 
@@ -36,26 +40,12 @@ enum ERRORS {
 #define READ_BUFFER_SIZE 1024
 #define ERR_MSG_BUF_SIZE 1024
 
-copy_tasks_queue* queue;
-pthread_mutex_t error_mutex;
+queue* tasks_queue;
 long error = 0;
 
-void set_error(long value) {
-	pthread_mutex_lock(&error_mutex);
-	error = value;
-	pthread_mutex_unlock(&error_mutex);
-}
-
-long get_error() {
-	pthread_mutex_lock(&error_mutex);
-	long result = error;
-	pthread_mutex_unlock(&error_mutex);
-	return result;
-}
-
 void set_error_and_interrupt_queue_wait(long value) {
-	set_error(value);
-	queue_interrupt_wait(queue);
+	error = value;
+	queue_interrupt_wait(tasks_queue);
 }
 
 int close_with_errmsg(int fd) {
@@ -68,41 +58,18 @@ int close_with_errmsg(int fd) {
 	return result;
 }
 
-char* append_name_to_path(const char* path, const char* name) {
-	assert(NULL != path);
-	assert(NULL != name);
-	size_t path_len = strlen(path);
-	size_t name_len = strlen(name);
-	char* new_path = malloc(path_len + (('/' == path[path_len - 1]) ? 0 : 1) + 
-							name_len + 1 /* '\0' */);
-	if (NULL == new_path) {
-		return NULL;		
-	}
-	strcpy(new_path, path);
-	if ('/' != new_path[strlen(path) - 1]) {
-		strcat(new_path, "/");
-	}
-	return strcat(new_path, name);
-}
-
-int pthread_create_detached_with_retry(size_t retry_period_nanoseconds,
-										pthread_t* thread,
-										void* (*start_routine)(void*),
-										void* arg) {
+int pthread_create_with_retry(size_t retry_period_nanoseconds,
+								pthread_t* thread,
+								pthread_attr_t* attr,
+								void* (*start_routine)(void*),
+								void* arg) {
 	assert(NULL != thread);
 	assert(NULL != start_routine);
-	pthread_attr_t attr;
 	long result = 0;
-	if (0 != (result = pthread_attr_init(&attr))) {
-		return result;
-	}
-	if (0 != (result = pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED))) {
-		return result;
-	}
 	struct timespec delay = {retry_period_nanoseconds / 1000000000,
 							retry_period_nanoseconds % 1000000000};
 	while (true) {
-		result = pthread_create(thread, &attr, start_routine, arg);
+		result = pthread_create(thread, attr, start_routine, arg);
 		if (0 != result) {
 			if (EAGAIN != result) {
 				return result;
@@ -113,7 +80,6 @@ int pthread_create_detached_with_retry(size_t retry_period_nanoseconds,
 			break;
 		}
 	}
-	pthread_attr_destroy(&attr);
 	return result;
 }
 
@@ -130,23 +96,10 @@ void* copy_file(void* arg) {
 	long opening_status = 0;
 	while (true) {
 		//Trying to open both files
-		while (true) {
-			src_fd = open(paths->src_path, O_RDONLY);
-			if (0 > src_fd) {
-				if ((EMFILE != errno) && (ENFILE != errno)) {
-					char buf[ERR_MSG_BUF_SIZE];
-					strerror_r(errno, buf, ERR_MSG_BUF_SIZE);
-					fprintf(stderr, "Error while opening src %s, %s\n", paths->src_path, buf);
-					opening_status = OPEN_ERROR;
-					break;
-				}
-				nanosleep(&delay, NULL);
-			}
-			else {
-				break;
-			}
-		}
-		if (0 != opening_status) {
+		src_fd = open_with_retry(RESOURCES_WAITING_DELAY_NANOSECONDS,
+									paths->src_path, O_RDONLY, 0);
+		if (0 > src_fd) {
+			opening_status = src_fd;
 			break;
 		}
 
@@ -167,7 +120,12 @@ void* copy_file(void* arg) {
 				if ((EMFILE != errno) && (ENFILE != errno)) {
 					char buf[ERR_MSG_BUF_SIZE];
 					strerror_r(errno, buf, ERR_MSG_BUF_SIZE);
-					fprintf(stderr, "Error while opening dst %s, %s\n", paths->dst_path, buf);
+					fprintf(stderr, "Error while opening dst %s, %s\n", 
+													paths->dst_path, buf);
+					/*
+					Next line is the reason why simple open_with_retry 
+					is not suitable here
+					*/
 					close_with_errmsg(src_fd);
 					opening_status = OPEN_ERROR;
 				}
@@ -239,14 +197,29 @@ void* copy_file(void* arg) {
 
 void* copy_directory(void* arg) {
 	assert(NULL != arg);
-	paths_pair* paths = (paths_pair*)arg;
-	DIR* src_dir = opendir_with_retry(RESOURCES_WAITING_DELAY_NANOSECONDS,
-										paths->src_path);
-	if (NULL == src_dir) {
+	paths_with_children* paths_and_children = (paths_with_children*)arg;
+	paths_pair* paths = paths_and_children->paths;
+	tasks_list_node* children_list = paths_and_children->children_list_head;
+	int src_dir_fd = open_with_retry(RESOURCES_WAITING_DELAY_NANOSECONDS,
+									paths->src_path, O_RDONLY, 0);
+	if (0 > src_dir_fd) {
 		fprintf(stderr, "Error while opening directory: %s\n", paths->src_path);
 		free_paths_pair(paths);
-		set_error_and_interrupt_queue_wait(OPENDIR_ERROR);
-		pthread_exit((void*)OPENDIR_ERROR);
+		free_tasks_list(children_list);
+		free(paths_and_children);
+		set_error_and_interrupt_queue_wait(FDOPENDIR_ERROR);
+		pthread_exit((void*)OPEN_ERROR);
+	}
+
+	DIR* src_dir = fdopendir(src_dir_fd);
+	if (NULL == src_dir) {
+		fprintf(stderr, "Error while opening directory stream: %s\n", paths->src_path);
+		close_with_errmsg(src_dir_fd);
+		free_paths_pair(paths);
+		free_tasks_list(children_list);
+		free(paths_and_children);
+		set_error_and_interrupt_queue_wait(FDOPENDIR_ERROR);
+		pthread_exit((void*)FDOPENDIR_ERROR);
 	}
 
 	if (0 != mkdir(paths->dst_path, 0700)) {
@@ -254,6 +227,9 @@ void* copy_directory(void* arg) {
 			if (access(paths->dst_path, W_OK | X_OK)) {
 				fprintf(stderr, "Directory exists and access denied: %s\n", paths->dst_path);
 				closedir(src_dir);
+				free_paths_pair(paths);
+				free_tasks_list(children_list);
+				free(paths_and_children);
 				set_error_and_interrupt_queue_wait(RIGHTS_ERROR);
 				pthread_exit((void*)RIGHTS_ERROR);
 			}
@@ -262,72 +238,31 @@ void* copy_directory(void* arg) {
 			fprintf(stderr, "Mkdir error: %s\n", paths->dst_path);
 			closedir(src_dir);
 			free_paths_pair(paths);
+			free_tasks_list(children_list);
+			free(paths_and_children);
 			set_error_and_interrupt_queue_wait(MKDIR_ERROR);
 			pthread_exit((void*)MKDIR_ERROR);
 		}
 	}
 
-	struct dirent* dir_entry = NULL;
+	tasks_list_node* cur_node = children_list;
 
 	long return_status = 0;
 
-	while (NULL != (dir_entry = readdir(src_dir))) {
-		if ((!strcmp(dir_entry->d_name, ".")) || 
-			(!strcmp(dir_entry->d_name, ".."))) {
-			continue;
-		}
-		struct stat stat;
-		char* cur_path = append_name_to_path(paths->src_path, dir_entry->d_name);
-		if (NULL == cur_path) {
-			fprintf(stderr, "Not enough memory\n");
-			return_status = MEMORY_ALLOCATION_ERROR;
+	while (NULL != cur_node) {
+		if (queue_push(tasks_queue, cur_node->task)) {
+			return_status = QUEUE_ERROR;
 			break;
 		}
-		if (lstat(cur_path, &stat)) {
-			fprintf(stderr, "Stat error: %s\n", cur_path);
-			free(cur_path);
-			return_status = STAT_ERROR;
-			break;
-		}
-		if (!(S_ISREG(stat.st_mode) || S_ISDIR(stat.st_mode))) {
-			free(cur_path);
-			continue;
-		}
-		paths_pair* next_paths = malloc(sizeof(*next_paths));
-		if (NULL == next_paths) {
-			fprintf(stderr, "Not enough memory\n");
-			free(cur_path);
-			return_status = MEMORY_ALLOCATION_ERROR;
-			break;
-		}
-		char* cur_new_path = append_name_to_path(paths->dst_path, dir_entry->d_name);
-		if (NULL == cur_new_path) {
-			fprintf(stderr, "Not enough memory\n");
-			free(cur_path);
-			free(next_paths);
-			return_status = MEMORY_ALLOCATION_ERROR;
-			break;
-		}
-		next_paths->src_path = cur_path;
-		next_paths->dst_path = cur_new_path;
-		if (S_ISDIR(stat.st_mode)) {
-			if (queue_push_task(queue, DIRECTORY, next_paths)) {
-				return_status = QUEUE_ERROR;
-				break;
-			}
-		}
-		else if (S_ISREG(stat.st_mode)) {
-			if (queue_push_task(queue, REGULAR_FILE, next_paths)) {
-				return_status = QUEUE_ERROR;
-				break;
-			}
-		}
+		cur_node = cur_node->next;
 	}
 	if (0 != return_status) {
 		set_error_and_interrupt_queue_wait(return_status);
 	}
 	closedir(src_dir);
 	free_paths_pair(paths);
+	free_tasks_list(children_list);
+	free(paths_and_children);
 	pthread_exit((void*)return_status);
 }
 
@@ -337,7 +272,13 @@ int main(int argc, char* argv[]) {
 		pthread_exit((void*)MISSING_ARGUMENT);
 	}
 
-	pthread_mutex_init(&error_mutex, NULL);
+	pthread_attr_t attr;
+	if (0 != pthread_attr_init(&attr)) {
+		return ATTR_SETTING_ERROR;
+	}
+	if (0 != pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED)) {
+		return ATTR_SETTING_ERROR;
+	}
 
 	paths_pair* paths = malloc(sizeof(*paths));
 	if (NULL == paths) {
@@ -355,50 +296,67 @@ int main(int argc, char* argv[]) {
 		pthread_exit((void*)MEMORY_ALLOCATION_ERROR);
 	}
 
-	queue = new_queue();
-	if (NULL == queue) {
+	tasks_queue = new_queue();
+	if (NULL == tasks_queue) {
 		fprintf(stderr, "Not enough memory\n");
 		free_paths_pair(paths);
 		pthread_exit((void*)MEMORY_ALLOCATION_ERROR);
 	}
 
-	if (queue_push_task(queue, DIRECTORY, paths)) {
+	copy_task first_task = create_task(DIRECTORY, paths);
+	
+	if (queue_push(tasks_queue, first_task)) {
 		fprintf(stderr, "Queueing error\n");
 		free_paths_pair(paths);
-		free_queue(queue);
+		free_queue(tasks_queue);
 		pthread_exit((void*)QUEUE_ERROR);
 	}
 
 	size_t expected_tasks = 1;
 	long return_status = 0;
 
-	while ((0 < expected_tasks) && (0 == get_error())) {
+	while ((0 < expected_tasks) && (0 == error)) {
 		copy_task task;
-		if (queue_pop(queue, &task)) {
+		if (queue_pop(tasks_queue, &task)) {
 			fprintf(stderr, "Queue error\n");
 			return_status = QUEUE_ERROR;
 			break;
 		}
-		if (0 != get_error()) {
-			return_status = get_error();
+		if (0 != error) {
+			return_status = error;
 			break;
 		}
-		if (0 > task.children) {
-			fprintf(stderr, "Task error\n");
-			return_status = TASK_ERROR;
+		size_t task_children_num = 0;
+		tasks_list_node* task_children;
+		if (0 != get_children_for_task(task, &task_children_num,
+										&task_children)) {
+			fprintf(stderr, "Dir reading error\n");
+			return_status = DIR_READING_ERROR;
 			break;
 		}
 		expected_tasks--;
-		expected_tasks += task.children;
+		expected_tasks += task_children_num;
 		switch (task.type) {
 			case DIRECTORY: {
+				paths_with_children* paths_and_children = malloc(sizeof(*paths_and_children));
+				if (NULL == paths_and_children) {
+					fprintf(stderr, "Not enough memory\n");
+					free_paths_pair(task.paths);
+					free_tasks_list(task_children);
+					return_status = MEMORY_ALLOCATION_ERROR;
+					break;
+				}
+				paths_and_children->paths = task.paths;
+				paths_and_children->children_list_head = task_children;
 				pthread_t thread;
 				int creation_result = 
-					pthread_create_detached_with_retry(RESOURCES_WAITING_DELAY_NANOSECONDS,
-														&thread, copy_directory, task.paths);
+					pthread_create_with_retry(RESOURCES_WAITING_DELAY_NANOSECONDS,
+												&thread, &attr, copy_directory, paths_and_children);
 				if (0 != creation_result) {
 					fprintf(stderr, "Can't create thread for %s\n", task.paths->src_path);
+					free(paths_and_children);
 					free_paths_pair(task.paths);
+					free_tasks_list(task_children);
 					return_status = PTHREAD_CREATE_ERROR;
 				}
 			}
@@ -406,8 +364,8 @@ int main(int argc, char* argv[]) {
 			case REGULAR_FILE: {
 				pthread_t thread;
 				int creation_result = 
-					pthread_create_detached_with_retry(RESOURCES_WAITING_DELAY_NANOSECONDS,
-														&thread, copy_file, task.paths);
+					pthread_create_with_retry(RESOURCES_WAITING_DELAY_NANOSECONDS,
+												&thread, &attr, copy_file, task.paths);
 				if (0 != creation_result) {
 					fprintf(stderr, "Can't create thread for %s\n", task.paths->src_path);
 					free_paths_pair(task.paths);
@@ -420,6 +378,7 @@ int main(int argc, char* argv[]) {
 			break;
 		}
 	}
-	free_queue(queue);
+	pthread_attr_destroy(&attr);
+	free_queue(tasks_queue);
 	pthread_exit((void*)return_status);
 }

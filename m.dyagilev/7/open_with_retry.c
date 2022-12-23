@@ -1,23 +1,21 @@
-#include <stddef.h>
-#include <errno.h>
-#include <assert.h>
 #include <stdbool.h>
+#include <assert.h>
+#include <errno.h>
 #include <time.h>
 
-#include "opendir_with_retry.h"
+#include "open_with_retry.h"
 
-
-DIR* opendir_with_retry(size_t retry_period_nanoseconds,
-						const char* name) {
+int open_with_retry(size_t retry_period_nanoseconds,
+					const char* name, int flags, mode_t mode) {
 	assert(NULL != name);
 	struct timespec delay = {retry_period_nanoseconds / 1000000000,
 							retry_period_nanoseconds % 1000000000};
-	DIR* result = NULL;
+	int result = 0;
 	while (true) {
-		result = opendir(name);
-		if (NULL == result) {
+		result = open(name, flags, mode);
+		if (0 > result) {
 			if ((EMFILE != errno) && (ENFILE != errno)) {
-				return NULL;
+				return result;
 			}
 			nanosleep(&delay, NULL);
 		}
@@ -27,4 +25,3 @@ DIR* opendir_with_retry(size_t retry_period_nanoseconds,
 	}
 	return result;
 }
-
