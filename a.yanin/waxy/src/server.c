@@ -90,9 +90,6 @@ static error_t *server_on_new_conn(loop_t *loop, tcp_handler_server_t *serv) {
     return err;
 
 loop_register_fail:
-    // TODO: add an on_free hook?
-    client_free_ctx(handler);
-
 client_init_fail:
     handler_free((handler_t *) handler);
     // this makes it so that the server keeps running if there are client issues

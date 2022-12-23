@@ -4,16 +4,17 @@
 
 #include <common/posix/adapter.h>
 #include <common/posix/ipc.h>
+#include <common/posix/file.h>
 
 #include "util.h"
 
 struct notify {
     handler_t handler;
+    notify_cb_t on_notified;
 
     pthread_mutex_t mtx;
     int wr_fd;
 
-    notify_cb_t on_notified;
     bool raised;
 };
 
@@ -37,8 +38,9 @@ static error_t *notify_process(notify_t *self, loop_t *loop, poll_flags_t flags)
     error_t *err = NULL;
 
     assert_mutex_lock(&self->mtx);
+    bool was_raised = self->raised;
 
-    if (self->raised) {
+    if (was_raised) {
         assert(flags & LOOP_READ);
         char buf = 0;
         ssize_t read_count = -1;
@@ -52,7 +54,6 @@ static error_t *notify_process(notify_t *self, loop_t *loop, poll_flags_t flags)
         err = error_combine(err, OK_IF(read_count == 1));
     }
 
-    bool was_raised = self->raised;
     self->raised = false;
     assert_mutex_unlock(&self->mtx);
 
@@ -87,6 +88,14 @@ error_t *notify_new(notify_t **result) {
     err = error_from_posix(wrapper_pipe(&rd_fd, &wr_fd));
     if (err) goto pipe_fail;
 
+    err = error_wrap("Could not switch the write end to non-blocking mode", error_from_posix(
+        wrapper_fcntli(wr_fd, F_SETFL, O_NONBLOCK)));
+    if (err) goto fcntli_fail;
+
+    err = error_wrap("Could not switch the write end to non-blocking mode", error_from_posix(
+        wrapper_fcntli(wr_fd, F_SETFL, O_NONBLOCK)));
+    if (err) goto fcntli_fail;
+
     pthread_mutexattr_t mtx_attr;
     error_assert(error_wrap("Could not intiialize mutex attributes", error_from_errno(
         pthread_mutexattr_init(&mtx_attr))));
@@ -102,6 +111,7 @@ error_t *notify_new(notify_t **result) {
 
     *result = self;
 
+fcntli_fail:
 pipe_fail:
     free(self);
 

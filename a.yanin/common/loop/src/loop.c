@@ -431,8 +431,6 @@ malloc_fail:
 }
 
 static error_t *loop_submit_tasks(loop_t *self, vec_pollfd_meta_t *meta) {
-    TODO("create tasks for each handler and submit them to the executor");
-
     error_t *err = NULL;
 
     for (size_t i = 0; i < vec_pollfd_meta_len(meta); ++i) {

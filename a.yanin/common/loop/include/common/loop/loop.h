@@ -57,6 +57,7 @@ typedef enum {
 typedef void (*handler_vtable_free_t)(handler_t *self);
 typedef error_t *(*handler_vtable_process_t)(handler_t *self, loop_t *loop, poll_flags_t events);
 typedef error_t *(*handler_vtable_on_error_t)(handler_t *self, loop_t *loop, error_t *error);
+typedef void (*handler_on_free_cb_t)(handler_t *self);
 
 typedef struct {
     // Frees the resources associated with the handler.
@@ -94,6 +95,7 @@ struct handler {
     handler_vtable_t const *vtable;
     void *custom_data;
     loop_t *loop;
+    handler_on_free_cb_t on_free;
     int fd;
     _Atomic(loop_handler_status_t) status;
     // passive handles don't block the loop from stopping even if they are
@@ -207,3 +209,8 @@ void *handler_custom_data(handler_t const *self);
 //
 // This method must be called from a synchronized context.
 void *handler_set_custom_data(handler_t *self, void *data);
+
+// Sets a callback to be invoked when this handler is about to be freed.
+//
+// This can be used to deallocate the resources the custom data points to.
+void handler_set_on_free(handler_t *self, handler_on_free_cb_t on_free);

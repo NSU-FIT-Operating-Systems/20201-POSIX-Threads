@@ -13,6 +13,7 @@ void handler_init(handler_t *self, handler_vtable_t const *vtable, int fd) {
 
     self->vtable = vtable;
     self->custom_data = NULL;
+    self->on_free = NULL;
     self->loop = NULL;
     self->fd = fd;
     self->status = LOOP_HANDLER_READY;
@@ -33,6 +34,10 @@ void handler_init(handler_t *self, handler_vtable_t const *vtable, int fd) {
 
 void handler_free(handler_t *self) {
     if (self == NULL) return;
+
+    if (self->on_free != NULL) {
+        self->on_free(self);
+    }
 
     self->vtable->free(self);
     free(self);
@@ -90,4 +95,8 @@ void *handler_set_custom_data(handler_t *self, void *data) {
     self->custom_data = data;
 
     return prev;
+}
+
+void handler_set_on_free(handler_t *self, handler_on_free_cb_t on_free) {
+    self->on_free = on_free;
 }

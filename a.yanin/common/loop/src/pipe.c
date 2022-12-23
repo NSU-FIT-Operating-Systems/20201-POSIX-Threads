@@ -3,6 +3,7 @@
 #include <common/error-codes/adapter.h>
 #include <common/posix/adapter.h>
 #include <common/posix/ipc.h>
+#include <common/posix/file.h>
 
 #include "io.h"
 #include "src/util.h"
@@ -210,6 +211,13 @@ error_t *pipe_handler_new(pipe_handler_wr_t **writer, pipe_handler_rd_t **reader
     if (err) goto pipe_fail;
 
     TODO("make fds non-blocking");
+    err = error_wrap("Could not switch the read end to non-blocking mode", error_from_posix(
+        wrapper_fcntli(rd_fd, F_SETFL, O_NONBLOCK)));
+    if (err) goto fcntli_fail;
+
+    err = error_wrap("Could not switch the write end to non-blocking mode", error_from_posix(
+        wrapper_fcntli(wr_fd, F_SETFL, O_NONBLOCK)));
+    if (err) goto fcntli_fail;
 
     handler_init(&wr->handler, &pipe_handler_wr_vtable, wr_fd);
     handler_init(&rd->handler, &pipe_handler_rd_vtable, rd_fd);
@@ -227,6 +235,7 @@ error_t *pipe_handler_new(pipe_handler_wr_t **writer, pipe_handler_rd_t **reader
 
     return err;
 
+fcntli_fail:
 pipe_fail:
     free(rd);
 

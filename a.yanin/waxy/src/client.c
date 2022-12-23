@@ -70,23 +70,20 @@ static slice_t const method_not_allowed_slice = {
     .len = sizeof(method_not_allowed),
 };
 
-static void client_free_ctx_internal(tcp_handler_t *handler, bool lock_rd);
-
-error_t *client_on_req_err_write(
+static error_t *client_on_req_err_write(
     loop_t *,
     tcp_handler_t *handler,
     size_t slice_count,
     slice_t const[static slice_count]
 ) {
     handler_unregister((handler_t *) handler);
-    client_free_ctx_internal(handler, true);
 
     return NULL;
 }
 
-error_t *client_cache_on_write(
+static error_t *client_cache_on_write(
     loop_t *,
-    tcp_handler_t *,
+    tcp_handler_t *handler,
     size_t slice_count,
     slice_t const slices[static slice_count]
 ) {
@@ -99,12 +96,20 @@ error_t *client_cache_on_write(
     // *And* we can cast away the constness because the pointer we initially obtained was not const
     // to begin with.
     cache_buf_t *buf = (cache_buf_t *)((char *) slices - offsetof(cache_buf_t, slice));
+
+    if (buf->eof) {
+        // the shutdown should not matter, I think, except for having the client notified of the EOF
+        // earlier, so it's not a bad thing either
+        tcp_shutdown_output(handler);
+        handler_unregister((handler_t *) handler);
+    }
+
     free(buf);
 
     return NULL;
 }
 
-error_t *client_cache_on_write_error(
+static error_t *client_cache_on_write_error(
     loop_t *,
     tcp_handler_t *,
     error_t *err,
@@ -120,7 +125,7 @@ error_t *client_cache_on_write_error(
     return err;
 }
 
-error_t *client_cache_on_read(cache_rd_t *rd, loop_t *) {
+static error_t *client_cache_on_read(cache_rd_t *rd, loop_t *) {
     error_t *err = NULL;
 
     client_ctx_t *ctx = handler_custom_data((handler_t *) rd);
@@ -164,20 +169,8 @@ write_fail:
     free(buf);
 
 malloc_fail:
-    // TODO: this must also be done in the write callback
-    // FIXME: use an arc for tossing the context around (prevents double-free if the two handles
-    // fail concurrently)
-
     // we're going to fail, so wrap up the party
-    // (see the comment above that explains the lock shenanigans)
-    handler_unlock((handler_t *) rd);
-    handler_lock((handler_t *) ctx->tcp);
-
-    client_free_ctx_internal(ctx->tcp, true);
     handler_unregister((handler_t *) ctx->tcp);
-
-    handler_unlock((handler_t *) ctx->tcp);
-    handler_lock((handler_t *) rd);
 
     // failing here would abort the whole program
     // that we must not do, for this is but a mere client, one of the many of its kind
@@ -186,7 +179,7 @@ malloc_fail:
     return err;
 }
 
-error_t *client_cache_on_update(cache_rd_t *rd, loop_t *, cache_entry_state_t state) {
+static error_t *client_cache_on_update(cache_rd_t *rd, loop_t *, cache_entry_state_t state) {
     error_t *err = NULL;
 
     client_ctx_t *ctx = handler_custom_data((handler_t *) rd);
@@ -208,7 +201,8 @@ error_t *client_cache_on_update(cache_rd_t *rd, loop_t *, cache_entry_state_t st
             "The cache entry the client %s:%u was reading from has been invalidated; dropping the connection",
             ip, port
         );
-        // TODO: unregister everyone involved
+        handler_unregister((handler_t *) ctx->tcp);
+
         return err;
 
     case CACHE_ENTRY_PARTIAL:
@@ -224,7 +218,6 @@ error_t *client_cache_on_update(cache_rd_t *rd, loop_t *, cache_entry_state_t st
     abort();
 }
 
-// TODO: make all the functions here static except those declared in the header
 static error_t *client_launch_cache_rd(client_cache_ctx_t *cache_ctx, cache_rd_t *rd) {
     error_t *err = NULL;
 
@@ -241,7 +234,7 @@ static error_t *client_launch_cache_rd(client_cache_ctx_t *cache_ctx, cache_rd_t
     return err;
 }
 
-error_t *client_on_cache_hit(void *data, cache_rd_t *rd) {
+static error_t *client_on_cache_hit(void *data, cache_rd_t *rd) {
     error_t *err = NULL;
 
     client_cache_ctx_t *cache_ctx = data;
@@ -257,7 +250,7 @@ fail:
     return err;
 }
 
-error_t *client_on_cache_miss(void *data, cache_rd_t *rd, cache_wr_t *wr) {
+static error_t *client_on_cache_miss(void *data, cache_rd_t *rd, cache_wr_t *wr) {
     error_t *err = NULL;
 
     client_cache_ctx_t *cache_ctx = data;
@@ -279,7 +272,7 @@ rd_launch_fail:
     return err;
 }
 
-error_t *client_process_request(
+static error_t *client_process_request(
     client_ctx_t *ctx,
     loop_t *loop,
     tcp_handler_t *handler,
@@ -437,7 +430,6 @@ static error_t *client_handle_http_request(
 fail:
     if (unregister) {
         handler_unregister((handler_t *) handler);
-        client_free_ctx_internal(handler, true);
     }
 
     return err;
@@ -450,7 +442,6 @@ static error_t *client_on_error(loop_t *, tcp_handler_t *handler, error_t *err) 
     log_printf(LOG_ERR, "An error has occured while processing a client %s:%u", ip, port);
     error_log_free(&err, LOG_ERR, ERROR_VERBOSITY_BACKTRACE | ERROR_VERBOSITY_SOURCE_CHAIN);
     handler_unregister((handler_t *) handler);
-    client_free_ctx_internal(handler, true);
 
     return err;
 }
@@ -468,7 +459,6 @@ static error_t *client_on_read(loop_t *loop, tcp_handler_t *handler, slice_t sli
 
     err = client_handle_http_request(ctx, loop, handler, prev_len, tcp_is_eof(handler));
     if (err) goto handle_fail;
-    // XXX: `ctx` must not be used here because it may have been freed by the call above
 
 handle_fail:
 append_fail:
@@ -493,6 +483,7 @@ error_t *client_init(tcp_handler_t *handler, cache_t *cache) {
     ctx->tcp = handler;
     ctx->rd = NULL;
     handler_set_custom_data((handler_t *) handler, ctx);
+    handler_set_on_free((handler_t *) handler, (handler_on_free_cb_t) client_free_ctx);
     tcp_set_on_error(handler, client_on_error);
     tcp_read(handler, client_on_read, NULL);
 
@@ -508,33 +499,24 @@ ctx_calloc_fail:
     return err;
 }
 
-static void client_free_ctx_internal(tcp_handler_t *handler, bool lock_rd) {
+void client_free_ctx(tcp_handler_t *handler) {
     client_ctx_t *ctx = handler_custom_data((handler_t *) handler);
 
     if (ctx->rd) {
         handler_t *rd = (handler_t *) ctx->rd;
 
-        if (lock_rd) {
-            handler_lock(rd);
-        }
+        handler_lock(rd);
 
         handler_set_custom_data(rd, NULL);
         handler_unregister(rd);
 
         ctx->rd = NULL;
 
-        if (lock_rd) {
-            handler_unlock(rd);
-        }
+        handler_unlock(rd);
     }
 
     string_free(&ctx->buf);
     free(ctx->headers);
     free(ctx);
     handler_set_custom_data((handler_t *) handler, NULL);
-}
-
-// TODO: better to hook this to the handler's free method
-void client_free_ctx(tcp_handler_t *handler) {
-    client_free_ctx_internal(handler, true);
 }
