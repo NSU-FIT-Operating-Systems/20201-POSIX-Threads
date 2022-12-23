@@ -104,31 +104,39 @@ namespace {
 
 TEST(HTTP_PROXY, BaseTest) {
     CURLcode res;
-    std::string read_buffer;
-    GetData(TEST_FILES_URL, true, &read_buffer, &res, 0);
+    std::string read_buffer1;
+    GetData(TEST_FILES_URL, false, &read_buffer1, &res, 0);
     ASSERT_EQ(res, CURLE_OK);
+    std::string read_buffer2;
+    GetData(TEST_FILES_URL, true, &read_buffer2, &res, 0);
+    ASSERT_EQ(res, CURLE_OK);
+    EXPECT_EQ(read_buffer1, read_buffer2);
 }
 
 TEST(HTTP_PROXY, ProxyDelayTest) {
     size_t iter_count = 5;
     size_t total_millis = 0;
-    std::string read_buffer;
+    std::string read_buffer1, read_buffer2;
     CURLcode res;
-    auto start = std::chrono::steady_clock::now();
-    GetData(DATA_50MB_URL, true, &read_buffer, &res, 0);
-    auto end = std::chrono::steady_clock::now();
-    ASSERT_EQ(res, CURLE_OK);
-    size_t elapsed_millis = duration_cast<std::chrono::milliseconds>(end - start).count();
-    log("Download time with proxy: " + std::to_string(elapsed_millis) + " millis");
+    std::chrono::steady_clock::time_point start, end;
+
     for (size_t i = 0; i < iter_count; i++) {
         start = std::chrono::steady_clock::now();
-        GetData(DATA_50MB_URL, false, &read_buffer, &res, 0);
+        GetData(DATA_50MB_URL, false, &read_buffer1, &res, 0);
         end = std::chrono::steady_clock::now();
         ASSERT_EQ(res, CURLE_OK);
         total_millis += duration_cast<std::chrono::milliseconds>(end - start).count();
     }
     size_t avg_millis = total_millis / iter_count;
     log("Average download time with no proxy: " + std::to_string(avg_millis) + " millis");
+
+    start = std::chrono::steady_clock::now();
+    GetData(DATA_50MB_URL, true, &read_buffer2, &res, 0);
+    end = std::chrono::steady_clock::now();
+    ASSERT_EQ(res, CURLE_OK);
+    size_t elapsed_millis = duration_cast<std::chrono::milliseconds>(end - start).count();
+    log("Download time with proxy: " + std::to_string(elapsed_millis) + " millis");
+
     bool faster = elapsed_millis <= avg_millis;
     size_t diff = !faster ? (elapsed_millis - avg_millis) : (avg_millis - elapsed_millis);
     size_t diffp = 100 * diff / avg_millis;
@@ -140,24 +148,28 @@ TEST(HTTP_PROXY, ProxyDelayTest) {
 TEST(HTTP_PROXY, SpeedIncreaseTest) {
     CURLcode res;
     std::string read_buffer1;
+
     auto start = std::chrono::steady_clock::now();
     GetData(DATA_200MB_URL, true, &read_buffer1, &res, 0);
     auto end = std::chrono::steady_clock::now();
     ASSERT_EQ(res, CURLE_OK);
     size_t millis_first = duration_cast<std::chrono::milliseconds>(end - start).count();
+
     std::string read_buffer2;
     start = std::chrono::steady_clock::now();
     GetData(DATA_200MB_URL, true, &read_buffer2, &res, 0);
     end = std::chrono::steady_clock::now();
     ASSERT_EQ(res, CURLE_OK);
+    EXPECT_EQ(read_buffer1, read_buffer2);
     size_t millis_second = duration_cast<std::chrono::milliseconds>(end - start).count();
+
     EXPECT_TRUE(millis_second * 2 < millis_first);
     if (millis_second > 1)
         log("Completed with cache " + std::to_string(millis_first / millis_second) + " times faster");
 }
 
 TEST(HTTP_PROXY, MultipleConnectionsTest) {
-    size_t conns_count = 100;
+    size_t conns_count = 50;
     log("Launching " + std::to_string(conns_count) + " 100MB-download sessions through PROXY");
     ASSERT_FALSE(conns_count <= 0);
     auto download_segments = std::vector<download_info *>();
@@ -177,7 +189,7 @@ TEST(HTTP_PROXY, MultipleConnectionsTest) {
     }
     auto canonic_buffer = download_segments.front()->buffer;
     for (const auto &info: download_segments) {
-        EXPECT_EQ(info->code, CURLE_OK);
+        ASSERT_EQ(info->code, CURLE_OK);
         EXPECT_EQ(canonic_buffer, info->buffer);
         delete info;
     }
@@ -194,11 +206,12 @@ TEST(HTTP_PROXY, RotationTest) {
     auto start = std::chrono::steady_clock::now();
     GetData(url, false, &read_buffer0, &res, 0);
     auto end = std::chrono::steady_clock::now();
-    size_t total_time_millis = duration_cast<std::chrono::milliseconds>(end - start).count();
-    log("Downloading time without proxy : " + std::to_string(total_time_millis / 1000) + " seconds");
-    size_t time_chunk_millis = total_time_millis / rotations_count;
     ASSERT_EQ(res, CURLE_OK);
+    size_t total_time_millis = duration_cast<std::chrono::milliseconds>(end - start).count();
     ASSERT_TRUE(total_time_millis > 0);
+    log("Downloading time without proxy : " + std::to_string(total_time_millis / 1000) + " seconds");
+
+    size_t time_chunk_millis = total_time_millis / rotations_count;   
     auto lead_segments = std::vector<download_info *>();
     for (size_t j = 0; j < rotations_count; j++) {
         auto download_segments = std::vector<download_info *>();
@@ -209,7 +222,7 @@ TEST(HTTP_PROXY, RotationTest) {
             info->url = url;
             info->timeout_secs = time_chunk_millis / 1000;
             if (i == lead_idx) {
-                info->timeout_secs *= 2; // get first file without proxy
+                info->timeout_secs *= 2; 
                 if (j == rotations_count - 1) {
                     info->timeout_secs = 0;
                 }
@@ -224,7 +237,7 @@ TEST(HTTP_PROXY, RotationTest) {
         for (const auto &info : download_segments) {
             int code = pthread_join(info->tid, nullptr);
             EXPECT_FALSE(code < 0);
-            EXPECT_TRUE(info->code == CURLE_OPERATION_TIMEDOUT || info->code
+            ASSERT_TRUE(info->code == CURLE_OPERATION_TIMEDOUT || info->code
                                                                   == CURLE_OK);
             if (info->code == CURLE_OK) {
                 EXPECT_EQ(read_buffer0, info->buffer);
@@ -241,13 +254,13 @@ TEST(HTTP_PROXY, RotationTest) {
         int code = pthread_join(info->tid, nullptr);
         EXPECT_FALSE(code < 0);
         if (count == rotations_count) {
-            EXPECT_EQ(info->code, CURLE_OK);
+            ASSERT_EQ(info->code, CURLE_OK);
             EXPECT_EQ(read_buffer0, info->buffer);
         } else {
-            EXPECT_TRUE(info->code == CURLE_OPERATION_TIMEDOUT || info->code
+            ASSERT_TRUE(info->code == CURLE_OPERATION_TIMEDOUT || info->code
                                                                   == CURLE_OK);
             if (info->code == CURLE_OK) {
-                ASSERT_EQ(read_buffer0, info->buffer);
+                EXPECT_EQ(read_buffer0, info->buffer);
             }
         }
         delete info;
