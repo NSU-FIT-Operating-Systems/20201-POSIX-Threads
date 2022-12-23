@@ -117,3 +117,6 @@ void cache_wr_complete(cache_wr_t *self);
 //
 // After this call new fetches to the resource would return a handle to this entry.
 error_t *cache_wr_commit(cache_wr_t *self);
+
+// Returns the URL associated with the cache entry.
+url_t const *cache_wr_url(cache_wr_t const *self);

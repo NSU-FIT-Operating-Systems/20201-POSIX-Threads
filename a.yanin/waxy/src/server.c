@@ -114,6 +114,7 @@ static error_t *server_new_tcp_serv(server_ctx_t *ctx, tcp_handler_server_t **re
 
     tcp_server_set_on_error(serv, server_on_fail);
     handler_set_custom_data((handler_t *) serv, ctx);
+    // TODO: set on_free
 
     err = tcp_server_listen(serv, DEFAULT_BACKLOG, server_on_new_conn, NULL);
     if (err) goto listen_fail;

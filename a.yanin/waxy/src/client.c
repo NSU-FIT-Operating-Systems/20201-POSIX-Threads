@@ -9,6 +9,7 @@
 
 #include "cache.h"
 #include "util.h"
+#include "upstream.h"
 
 #define SERVER_HEADER "Server: waxy\r\n"
 
@@ -254,10 +255,11 @@ static error_t *client_on_cache_miss(void *data, cache_rd_t *rd, cache_wr_t *wr)
     error_t *err = NULL;
 
     client_cache_ctx_t *cache_ctx = data;
+    err = upstream_init(wr, cache_ctx->loop);
+    if (err) goto upstream_init_fail;
+
     err = client_launch_cache_rd(cache_ctx, rd);
     if (err) goto rd_launch_fail;
-
-    // TODO: request the resource from the upstream server
 
     char ip[INET6_ADDRSTRLEN] = {0};
     uint16_t port = 0;
@@ -269,6 +271,9 @@ static error_t *client_on_cache_miss(void *data, cache_rd_t *rd, cache_wr_t *wr)
     );
 
 rd_launch_fail:
+    // we don't really care if the upstream handler continues, actually
+
+upstream_init_fail:
     return err;
 }
 

@@ -51,10 +51,12 @@ static byte_hasher_config_t const url_ptr_secondary_hasher_data = {
 };
 
 static size_t url_ptr_hash_primary(url_t const *const *ptr, void *data) {
+    // FIXME: this is incorrect
     return byte_hasher(*ptr, data);
 }
 
 static size_t url_ptr_hash_secondary(url_t const *const *ptr, void *data) {
+    // FIXME: this is incorrect
     return byte_hasher_secondary(*ptr, data);
 }
 
@@ -628,4 +630,8 @@ committed:
     assert_mutex_unlock(&entry->mtx);
 
     return err;
+}
+
+url_t const *cache_wr_url(cache_wr_t const *self) {
+    return &arc_entry_get(self->entry)->url;
 }
