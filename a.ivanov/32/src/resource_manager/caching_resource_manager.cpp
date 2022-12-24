@@ -29,6 +29,8 @@ namespace multithread_proxy {
             return cache->get(name);
         }
         auto *res = new SimpleResource;
+        cache->put(name, res);
+        pthread_mutex_unlock(mutex);
         auto *arg = new ServerArgs;
         arg->rm = http_request;
         arg->resource = res;
@@ -37,12 +39,9 @@ namespace multithread_proxy {
         int code = pthread_create(&tid, nullptr, RunNewServer, arg);
         if (code < 0) {
             delete res;
-            pthread_mutex_unlock(mutex);
             return nullptr;
         }
-        cache->put(name, res);
         server_tids.push_back(tid);
-        pthread_mutex_unlock(mutex);
         return res;
     }
 

@@ -16,6 +16,12 @@ namespace multithread_proxy {
 
         virtual int getNotifyFd() = 0;
 
+        virtual int subscribe() = 0;
+
+        virtual int cancel() = 0;
+
+        virtual size_t getSubscribesCount() = 0;
+
         virtual io::Message *getData() = 0;
 
         virtual void updateData(io::Message *data) = 0;

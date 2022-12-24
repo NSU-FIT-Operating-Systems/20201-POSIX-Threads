@@ -100,8 +100,10 @@ namespace multithread_proxy {
         return sd;
     }
 
-    int Server::notifySubscribers() {
-        int code = eventfd_write(notify_fd, resource->getParts()->size());
+    int Server::notifySubscribers() const {
+        size_t post_count = resource->getSubscribesCount();
+        if (post_count == 0) post_count = 1;
+        int code = eventfd_write(notify_fd, post_count);
         return code;
     }
 

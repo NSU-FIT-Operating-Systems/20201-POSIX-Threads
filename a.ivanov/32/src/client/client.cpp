@@ -41,36 +41,13 @@ namespace multithread_proxy {
             freeResources();
             return status_code::COMPLETED;
         }
-        fd_set read_set{};
-        FD_ZERO(&read_set);
-        FD_SET(notify_fd, &read_set);
         while (true) {
-            struct timeval timeout {
-                .tv_sec = 0,
-                .tv_usec = 1000 * 200
-            };
-            code = select(notify_fd + 1, &read_set, nullptr, nullptr, &timeout);
-            if (code < 0) {
-                logErrorWithErrno("Error in select()");
+            eventfd_t value;
+            code = eventfd_read(notify_fd, &value);
+            if (code == status_code::FAIL) {
+                logErrorWithErrno("Error in eventfd_read()");
                 freeResources();
                 return status_code::FAIL;
-            } else if (code > 0) {
-                eventfd_t value;
-                code = eventfd_read(notify_fd, &value);
-                if (code == status_code::FAIL) {
-                    logErrorWithErrno("Error in eventfd_read()");
-                    freeResources();
-                    return status_code::FAIL;
-                }
-                if (resource->getParts()->size() != recv_count) {
-                    code = eventfd_write(notify_fd, value);
-                    if (code == status_code::FAIL) {
-                        logErrorWithErrno("Error in eventfd_write()");
-                        freeResources();
-                        return status_code::FAIL;
-                    }
-                }
-//                log("Client " + std::to_string(fd) + " got notification");
             }
             code = sendAvailableParts();
             if (code == status_code::FAIL) {
@@ -91,8 +68,7 @@ namespace multithread_proxy {
     }
 
     int Client::sendAvailableParts() {
-//        log("Client " + std::to_string(fd) + " got " + std::to_string(recv_count) + "/" + std::to_string(resource->getParts()->size()));
-        while (recv_count < resource->getParts()->size()) {
+       while (recv_count < resource->getParts()->size()) {
             auto *msg = resource->getParts()->at(recv_count);
             recv_count++;
             recv_bytes += msg->len;
@@ -106,6 +82,9 @@ namespace multithread_proxy {
 
     void Client::freeResources() const {
         log("Terminate client thread " + std::to_string(fd));
+        if (resource != nullptr) {
+            resource->cancel();
+        }
         int ret_val = close(fd);
         if (ret_val < 0) {
             logErrorWithErrno("Error in close");
@@ -150,7 +129,7 @@ namespace multithread_proxy {
                 } else {
                     if (resource->getStatus() == INCOMPLETED) {
                         sendAvailableParts();
-                        notify_fd = resource->getNotifyFd();
+                        notify_fd = resource->subscribe();
                         return status_code::SUCCESS;
                     } else if (resource->getStatus() == COMPLETED) {
                         sendAvailableParts();

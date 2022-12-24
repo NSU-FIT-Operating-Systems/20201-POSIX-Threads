@@ -18,7 +18,7 @@ namespace multithread_proxy {
     class SimpleResource : public Resource {
     public:
         SimpleResource() {
-            event_fd = eventfd(0, 0);
+            event_fd = eventfd(0, EFD_SEMAPHORE);
             if (event_fd == -1) {
                 logErrorWithErrno("Error in eventfd()");
                 assert(false);
@@ -44,6 +44,24 @@ namespace multithread_proxy {
 
         int getNotifyFd() override {
             return event_fd;
+        }
+
+        int subscribe() override {
+            pthread_rwlock_wrlock(rwlock);
+            subscribes_count++;
+            pthread_rwlock_unlock(rwlock);
+            return event_fd;
+        }
+
+        int cancel() override {
+            pthread_rwlock_wrlock(rwlock);
+            if (subscribes_count > 0) subscribes_count--;
+            pthread_rwlock_unlock(rwlock);
+            return event_fd;
+        }
+
+        size_t getSubscribesCount() override {
+            return subscribes_count;
         }
 
         List<io::Message> *getParts() override {
@@ -91,6 +109,8 @@ namespace multithread_proxy {
         size_t content_length = 0;
         bool free_messages = true;
         pthread_rwlock_t *rwlock;
+
+        size_t subscribes_count = 0;
         // vector of socket descriptors of clients who wait for the resource
     };
 }

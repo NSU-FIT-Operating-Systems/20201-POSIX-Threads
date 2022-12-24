@@ -25,7 +25,7 @@ namespace multithread_proxy {
 
         int handleResponse(io::Message *new_part);
 
-        int notifySubscribers();
+        int notifySubscribers() const;
 
         int fd = -1;
         int notify_fd = -1;
