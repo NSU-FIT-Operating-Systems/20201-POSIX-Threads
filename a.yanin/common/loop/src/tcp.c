@@ -208,7 +208,36 @@ malloc_fail:
     return err;
 }
 
+static error_t *tcp_client_drop_write_reqs(tcp_handler_t *self, loop_t *loop) {
+    assert(loop != NULL);
+
+    error_t *err = NULL;
+
+    for (size_t i = 0; i < vec_wrreq_len(&self->write_reqs); ++i) {
+        tcp_write_req_t const *req = vec_wrreq_get(&self->write_reqs, i);
+
+        if (req->on_error != NULL) {
+            err = error_combine(err, req->on_error(loop, self, NULL,
+                req->write_req.slice_count,
+                req->write_req.slices,
+                req->write_req.written_count));
+        }
+    }
+
+    vec_wrreq_clear(&self->write_reqs);
+
+    return err;
+}
+
 static void tcp_client_free(tcp_handler_t *self) {
+    error_t *err = error_wrap("An error has occured while freeing a TCP handler",
+        tcp_client_drop_write_reqs(self, handler_loop((handler_t *) self)));
+
+    if (err) {
+        error_log_free(&err, LOG_WARN, ERROR_VERBOSITY_SOURCE_CHAIN | ERROR_VERBOSITY_BACKTRACE);
+    }
+
+    vec_wrreq_free(&self->write_reqs);
     tcp_handler_free(&self->handler);
 }
 
@@ -360,6 +389,8 @@ static error_t *tcp_client_process_write_req(
     error_t *err,
     bool *processed
 ) {
+    log_printf(LOG_DEBUG, "Processing a write request");
+
     return io_process_write_req(
         self,
         loop,
@@ -370,25 +401,6 @@ static error_t *tcp_client_process_write_req(
         tcp_client_process_write_req_on_write,
         tcp_client_process_write_req_on_error
     );
-}
-
-static error_t *tcp_client_drop_write_reqs(tcp_handler_t *self, loop_t *loop) {
-    error_t *err = NULL;
-
-    for (size_t i = 0; i < vec_wrreq_len(&self->write_reqs); ++i) {
-        tcp_write_req_t const *req = vec_wrreq_get(&self->write_reqs, i);
-
-        if (req->on_error != NULL) {
-            err = error_combine(err, req->on_error(loop, self, NULL,
-                req->write_req.slice_count,
-                req->write_req.slices,
-                req->write_req.written_count));
-        }
-    }
-
-    vec_wrreq_clear(&self->write_reqs);
-
-    return err;
 }
 
 static error_t *tcp_client_handle_write(tcp_handler_t *self, loop_t *loop) {
@@ -484,6 +496,8 @@ static error_t *tcp_client_process(tcp_handler_t *self, loop_t *loop, poll_flags
 }
 
 static error_t *tcp_client_on_error(tcp_handler_t *self, loop_t *loop, error_t *err) {
+    log_printf(LOG_DEBUG, "Handling a client error");
+
     if (self->on_error) {
         err = self->on_error(loop, self, err);
     }
@@ -532,6 +546,8 @@ error_t *tcp_connect(
     err = error_wrap("Could not switch the socket to non-blocking mode",
         error_from_posix(wrapper_fcntli(fd, F_SETFL, O_NONBLOCK)));
     if (err) goto fcntl_fail;
+
+    client_init(self, fd);
 
     tcp_handler_state_t state = TCP_HANDLER_CONNECTING;
 
@@ -600,7 +616,7 @@ void tcp_read(tcp_handler_t *self, tcp_on_read_cb_t on_read, tcp_on_read_error_c
     assert(self->state == TCP_HANDLER_ESTABLISHED);
 
     self->on_read = on_read;
-    self->on_error = on_error;
+    self->on_read_error = on_error;
     poll_flags_t flags = handler_pending_mask(&self->handler);
 
     if (self->on_read != NULL) {
@@ -626,6 +642,8 @@ error_t *tcp_write(
     error_t *err = NULL;
     err = error_wrap("The output has been shut down", OK_IF(!self->output_shut));
     if (err) goto fail;
+
+    log_printf(LOG_DEBUG, "Added a write request");
 
     err = error_from_common(vec_wrreq_push(&self->write_reqs, (tcp_write_req_t) {
         .write_req = {

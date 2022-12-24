@@ -254,12 +254,14 @@ fail:
 static error_t *client_on_cache_miss(void *data, cache_rd_t *rd, cache_wr_t *wr) {
     error_t *err = NULL;
 
+    bool rd_owned = true;
     client_cache_ctx_t *cache_ctx = data;
     err = upstream_init(wr, cache_ctx->loop);
     if (err) goto upstream_init_fail;
 
     err = client_launch_cache_rd(cache_ctx, rd);
     if (err) goto rd_launch_fail;
+    rd_owned = false;
 
     char ip[INET6_ADDRSTRLEN] = {0};
     uint16_t port = 0;
@@ -270,10 +272,16 @@ static error_t *client_on_cache_miss(void *data, cache_rd_t *rd, cache_wr_t *wr)
         ip, port
     );
 
+    return err;
+
 rd_launch_fail:
     // we don't really care if the upstream handler continues, actually
 
 upstream_init_fail:
+    if (rd_owned) {
+        handler_free((handler_t *) rd);
+    }
+
     return err;
 }
 
@@ -292,6 +300,8 @@ static error_t *client_process_request(
     char ip[INET6_ADDRSTRLEN] = {0};
     uint16_t port = 0;
     tcp_remote_info(handler, ip, &port);
+
+    bool url_owned = false;
 
     if (minor_version != 0 && minor_version != 1) {
         log_printf(
@@ -317,12 +327,15 @@ static error_t *client_process_request(
         if (err) goto fail;
     }
 
+    // FIXME: doesn't work with IP addresses for some reason
     url_t url = {0};
-    err = url_parse(path, &url);
+    bool fatal = false;
+    err = url_parse(path, &url, &fatal);
+    url_owned = !fatal;
 
     if (!err) {
         err = error_wrap("Unsupported scheme", OK_IF(
-            slice_cmp(url.scheme, slice_from_cstr("http"))));
+            slice_cmp(url.scheme, slice_from_cstr("http")) == 0));
     }
 
     if (!err) {
@@ -348,8 +361,15 @@ static error_t *client_process_request(
         .loop = loop,
     };
     err = cache_fetch(ctx->cache, &url, client_on_cache_hit, client_on_cache_miss, &cache_ctx);
+    if (err) goto fail;
+
+    *unregister = false;
 
 fail:
+    if (url_owned) {
+        string_free(&url.buf);
+    }
+
     return err;
 }
 

@@ -56,6 +56,8 @@ struct loop {
     // this is a weak reference to `notify`
     notify_t *notify;
     atomic_bool stopped;
+    // whether this loop was ever running
+    bool started;
 };
 
 error_t *loop_on_notified(loop_t *, notify_t *) {
@@ -110,7 +112,8 @@ calloc_fail:
 }
 
 void loop_free(loop_t *self) {
-    error_assert(error_wrap("The loop must have been stopped", OK_IF(self->stopped)));
+    error_assert(error_wrap("The loop must have been stopped",
+        OK_IF(!self->started || self->stopped)));
 
     pthread_mutex_destroy(&self->error_mtx);
     pthread_mutex_destroy(&self->pending_mtx);
@@ -385,7 +388,11 @@ static error_t *loop_handler_task_cb(task_ctx_t *ctx) {
         &(loop_handler_status_t) { LOOP_HANDLER_QUEUED },
         LOOP_HANDLER_READY
     );
-    loop_interrupt(ctx->loop);
+
+    if (handler != (handler_t *) ctx->loop->notify) {
+        loop_interrupt(ctx->loop);
+    }
+
     arc_handler_free(ctx->handler);
     free(ctx);
 
@@ -472,6 +479,8 @@ static error_t *loop_process_task_results(loop_t *self) {
 error_t *loop_run(loop_t *self) {
     error_t *err = NULL;
 
+    self->started = true;
+
     vec_pollfd_t pollfd = vec_pollfd_new();
     vec_pollfd_meta_t meta = vec_pollfd_meta_new();
 
@@ -525,7 +534,6 @@ fail:
 }
 
 void loop_stop(loop_t *self) {
-    log_printf(LOG_INFO, "Stopping the loop on request");
     self->stopped = true;
     notify_wakeup(self->notify);
 }

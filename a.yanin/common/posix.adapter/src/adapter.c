@@ -1,6 +1,7 @@
 #include "common/posix/adapter.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 typedef struct {
     error_t error;
@@ -8,7 +9,10 @@ typedef struct {
 } error_posix_t;
 
 static void error_posix_description(error_posix_t const *self, string_t *buf) {
-    string_appendf(buf, "%s [error code %d]", self->err.message, self->err.errno_code);
+    string_appendf(buf, "%s [error code %d: %s]",
+        self->err.message,
+        self->err.errno_code,
+        strerror(self->err.errno_code));
 }
 
 static void error_posix_free(error_posix_t *) {}

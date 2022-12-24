@@ -115,7 +115,7 @@ error_t *io_process_write_req(
     if (err) goto writev_fail;
 
     written_count = req->written_count += (size_t) count;
-    assert(req->written_count < write_requested);
+    assert(req->written_count <= write_requested);
 
     if (req->written_count == write_requested) {
         err = on_write(self, loop, req);

@@ -141,7 +141,8 @@ bool notify_post(notify_t *self) {
 
 void notify_wakeup(notify_t *self) {
     ssize_t written_count = -1;
-    posix_err_t status = wrapper_write(self->wr_fd, "1", 1, &written_count);
+    log_printf(LOG_DEBUG, "Requesting an unconditional wakeup");
+    posix_err_t status = wrapper_write(self->wr_fd, "2", 1, &written_count);
 
     if (status.errno_code != EWOULDBLOCK && status.errno_code != EAGAIN) {
         error_assert(error_from_posix(status));

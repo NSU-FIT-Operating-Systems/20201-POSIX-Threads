@@ -44,6 +44,10 @@ typedef struct {
     char const *str;
 } error_from_cstr_t;
 
+static error_t const *error_from_cstr_source(error_from_cstr_t const *self) {
+    return self->source;
+}
+
 static void error_from_cstr_description(error_from_cstr_t const *self, string_t *buf) {
     string_appendf(buf, "%s", self->str);
 }
@@ -53,7 +57,7 @@ static void error_from_cstr_free(error_from_cstr_t *self) {
 }
 
 static error_vtable_t const error_from_cstr_vtable = {
-    .source = error_null,
+    .source = (error_vtable_source_t) error_from_cstr_source,
     .secondary = error_null,
     .description = (error_vtable_description_t) error_from_cstr_description,
     .free = (error_vtable_free_t) error_from_cstr_free,
@@ -81,6 +85,10 @@ typedef struct {
     string_t str;
 } error_from_string_t;
 
+static error_t const *error_from_string_source(error_from_string_t const *self) {
+    return self->source;
+}
+
 static void error_from_string_description(error_from_string_t const *self, string_t *buf) {
     string_append(buf, &self->str);
 }
@@ -91,7 +99,7 @@ static void error_from_string_free(error_from_string_t *self) {
 }
 
 static error_vtable_t const error_from_string_vtable = {
-    .source = error_null,
+    .source = (error_vtable_source_t) error_from_string_source,
     .secondary = error_null,
     .description = (error_vtable_description_t) error_from_string_description,
     .free = (error_vtable_free_t) error_from_string_free,

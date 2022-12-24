@@ -246,6 +246,7 @@ static error_t *cache_create_entry_unsync(
 
     *result_rd = rd;
     *result_wr = wr;
+    arc_entry_free(arc);
 
     return err;
 
@@ -357,6 +358,7 @@ static void rd_free(cache_rd_t *self) {
 
         for (size_t i = 0; i < vec_rd_len(&entry->handles); ++i) {
             if (*vec_rd_get(&entry->handles, i) == self) {
+                log_printf(LOG_DEBUG, "Removed a cache_rd_t from entry->handles");
                 vec_rd_remove(&entry->handles, i);
 
                 break;
@@ -381,7 +383,12 @@ static error_t *rd_process(cache_rd_t *self, loop_t *loop, poll_flags_t) {
 
     assert_mutex_unlock(&entry->mtx);
 
+    log_printf(LOG_DEBUG, "rd_process: new_len = %zu, state = %d, self->count = %zu, self->last_state = %d",
+        new_len, state, self->count, self->last_state);
+
     if (new_len > self->count || (state != self->last_state && state == CACHE_ENTRY_COMPLETE)) {
+        log_printf(LOG_DEBUG, "rd_process: Calling on_read");
+
         err = self->on_read(self, loop);
         if (err) return err;
 
@@ -391,6 +398,7 @@ static error_t *rd_process(cache_rd_t *self, loop_t *loop, poll_flags_t) {
     }
 
     if (state != self->last_state) {
+        log_printf(LOG_DEBUG, "rd_process: Calling on_update");
         err = self->on_update(self, loop, state);
         if (err) return err;
 
@@ -424,6 +432,7 @@ static error_t *cache_entry_new_rd_unsync(arc_entry_t *arc, cache_rd_t **result)
     rd->last_state = -1;
     rd->registered = false;
 
+    log_printf(LOG_DEBUG, "Registering the newly created rd_handle");
     err = error_wrap("Could not register the created handle", error_from_common(
         vec_rd_push(&entry->handles, rd)));
     if (err) goto rd_push_fail;
@@ -435,6 +444,7 @@ static error_t *cache_entry_new_rd_unsync(arc_entry_t *arc, cache_rd_t **result)
     }
 
     *result = rd;
+    arc_entry_free(arc);
 
     return err;
 
@@ -469,11 +479,14 @@ static void cache_entry_free(cache_entry_t *self) {
     vec_rd_free(&self->handles);
     string_free(&self->buf);
     self->state = CACHE_ENTRY_INVALID;
+    free(self);
 }
 
 static void cache_entry_wake_unsync(cache_entry_t *entry) {
+    log_printf(LOG_DEBUG, "cache_entry_wake_unsync: %zu handles", vec_rd_len(&entry->handles));
     for (size_t i = 0; i < vec_rd_len(&entry->handles); ++i) {
         cache_rd_t *handle = *vec_rd_get_mut(&entry->handles, i);
+        log_printf(LOG_DEBUG, "Waking up %p", (void *) handle);
         handler_force(&handle->handler);
     }
 }
@@ -541,6 +554,7 @@ void cache_wr_free(cache_wr_t *self) {
 
     assert_mutex_unlock(&entry->mtx);
     arc_entry_free(arc);
+    free(self);
 }
 
 error_t *cache_wr_write(cache_wr_t *self, slice_t slice) {
@@ -581,6 +595,8 @@ void cache_wr_complete(cache_wr_t *self) {
     assert_mutex_lock(&entry->mtx);
 
     cache_entry_set_state_unsync(entry, CACHE_ENTRY_COMPLETE);
+
+    assert_mutex_unlock(&entry->mtx);
 }
 
 error_t *cache_wr_commit(cache_wr_t *self) {

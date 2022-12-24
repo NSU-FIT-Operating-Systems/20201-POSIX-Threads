@@ -1,5 +1,6 @@
 #include "url.h"
 
+#include <assert.h>
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
@@ -9,6 +10,79 @@
 #include <common/io.h>
 
 #include "util.h"
+
+typedef struct {
+    size_t start;
+    size_t len;
+} region_t;
+
+[[maybe_unused]]
+static void log_url(url_t *url) {
+    log_printf(LOG_DEBUG,
+        "Parsed a URL:\n"
+        "  .buf: %.*s [len = %zu]\n"
+        "  .scheme: %.*s [len = %zu]\n"
+        "  .username: %.*s [len = %zu]\n"
+        "  .password: %.*s [len = %zu]\n"
+        "  .host%s: %.*s [len = %zu]\n"
+        "  .port%s: %u\n"
+        "  .path: %.*s [len = %zu]\n"
+        "  .query%s: %.*s [len = %zu]\n"
+        "  .fragment%s: %.*s [len = %zu]\n",
+        (int) string_len(&url->buf), string_as_cptr(&url->buf), string_len(&url->buf),
+        (int) url->scheme.len, url->scheme.base, url->scheme.len,
+        (int) url->username.len, url->username.base, url->username.len,
+        (int) url->password.len, url->password.base, url->password.len,
+        url->host_null ? "[null]" : "", (int) url->host.len, url->host.base, url->host.len,
+        url->port_null ? "[null]" : "", url->port,
+        (int) url->path.len, url->path.base, url->path.len,
+        url->query_null ? "[null]" : "", (int) url->query.len, url->query.base, url->query.len,
+        url->fragment_null ? "[null]" : "",
+        (int) url->fragment.len, url->fragment.base, url->fragment.len
+    );
+}
+
+static region_t region_empty(void) {
+    return (region_t) {
+        .start = 0,
+        .len = 0,
+    };
+}
+
+static slice_t region_to_slice(char const *base, region_t region) {
+    assert(region.len <= ((size_t) -1) / 2);
+
+    return (slice_t) {
+        .base = base + region.start,
+        .len = region.len,
+    };
+}
+
+static region_t slice_to_region(char const *base, slice_t slice) {
+    assert(slice.base - base >= 0);
+    assert(slice.len <= ((size_t) -1) / 2);
+
+    return (region_t) {
+        .start = slice.base - base,
+        .len = slice.len,
+    };
+}
+
+// Like `url_t`, but doesn't use slices
+typedef struct {
+    region_t scheme;
+    region_t username;
+    region_t password;
+    region_t host;
+    region_t path;
+    region_t query;
+    region_t fragment;
+    uint16_t port;
+    bool host_null;
+    bool port_null;
+    bool query_null;
+    bool fragment_null;
+} url_region_t;
 
 static bool is_c0(int c) {
     return c < 0x20;
@@ -108,7 +182,7 @@ typedef enum {
 } url_parser_state_t;
 
 typedef struct {
-    url_t *result;
+    url_region_t *result;
     string_t const *input;
     string_t *buf;
     size_t slice_start;
@@ -309,6 +383,7 @@ static slice_t url_parser_buf(url_parser_t const *self) {
     size_t start = self->slice_start;
     size_t buf_len = string_len(self->buf);
     size_t len = buf_len - start;
+    assert(buf_len >= start);
 
     return (slice_t) {
         .base = string_as_cptr(self->buf) + start,
@@ -348,21 +423,35 @@ static bool url_parser_rem_starts_with(url_parser_t const *self, char const *str
     return remaining.len >= len && memcmp(remaining.base, str, len) == 0;
 }
 
+static slice_t url_parser_region_to_slice(url_parser_t const *self, region_t region) {
+    return region_to_slice(string_as_cptr(self->buf), region);
+}
+
+static region_t url_parser_slice_to_region(url_parser_t const *self, slice_t slice) {
+    return slice_to_region(string_as_cptr(self->buf), slice);
+}
+
 // returns the port number for the scheme if it's special
 //
 // return 0xffff'fffe (-2) the scheme is not special
 static uint32_t url_parser_is_special(url_parser_t const *self) {
-    if (slice_cmp(self->result->scheme, slice_from_cstr("ftp")) == 0) {
+    if (slice_cmp(url_parser_region_to_slice(self, self->result->scheme),
+            slice_from_cstr("ftp")) == 0) {
         return 21;
-    } else if (slice_cmp(self->result->scheme, slice_from_cstr("file")) == 0) {
+    } else if (slice_cmp(url_parser_region_to_slice(self, self->result->scheme),
+            slice_from_cstr("file")) == 0) {
         return -1;
-    } else if (slice_cmp(self->result->scheme, slice_from_cstr("http")) == 0) {
+    } else if (slice_cmp(url_parser_region_to_slice(self, self->result->scheme),
+            slice_from_cstr("http")) == 0) {
         return 80;
-    } else if (slice_cmp(self->result->scheme, slice_from_cstr("https")) == 0) {
+    } else if (slice_cmp(url_parser_region_to_slice(self, self->result->scheme),
+            slice_from_cstr("https")) == 0) {
         return 443;
-    } else if (slice_cmp(self->result->scheme, slice_from_cstr("ws")) == 0) {
+    } else if (slice_cmp(url_parser_region_to_slice(self, self->result->scheme),
+            slice_from_cstr("ws")) == 0) {
         return 80;
-    } else if (slice_cmp(self->result->scheme, slice_from_cstr("wss")) == 0) {
+    } else if (slice_cmp(url_parser_region_to_slice(self, self->result->scheme),
+            slice_from_cstr("wss")) == 0) {
         return 443;
     } else {
         return -2;
@@ -405,10 +494,12 @@ static error_t *url_parser_scheme(url_parser_t *self) {
             goto fail;
         }
     } else if (c == ':') {
-        self->result->scheme = url_parser_slice(self);
+        slice_t scheme = url_parser_slice(self);
+        self->result->scheme = url_parser_slice_to_region(self, scheme);
         self->special = url_parser_is_special(self);
 
-        if (slice_cmp(self->result->scheme, slice_from_cstr("file"))) {
+        if (slice_cmp(url_parser_region_to_slice(self, self->result->scheme),
+                slice_from_cstr("file")) == 0) {
             err = error_combine(err, error_wrap("`//` is required after the file scheme",
                 OK_IF(url_parser_rem_starts_with(self, "//"))));
             self->state = STATE_FILE;
@@ -504,18 +595,22 @@ static error_t *url_parser_auth(url_parser_t *self) {
         }
 
         self->at_sign_seen = true;
-        slice_t buf = url_parser_slice(self);
-        self->result->username.base = buf.base + buf.len;
+        region_t buf = url_parser_slice_to_region(self, url_parser_slice(self));
+        self->result->username.start = buf.len;
 
         for (size_t i = 0; i < buf.len; ++i) {
-            if (buf.base[i] == ':' && !self->password_token_seen) {
+            slice_t buf_slice = url_parser_region_to_slice(self, buf);
+
+            if (buf_slice.base[i] == ':' && !self->password_token_seen) {
                 self->password_token_seen = true;
-                self->result->password.base = string_as_cptr(self->buf) + string_len(self->buf);
+                self->result->password.start = string_len(self->buf);
 
                 continue;
             }
 
-            error_t *encode_err = percent_encode(buf.base[i], self->buf, PERCENC_USERINFO);
+            error_t *encode_err = percent_encode(buf_slice.base[i], self->buf, PERCENC_USERINFO);
+            // XXX: `buf_slice` has been invalidated and must not be used
+
             if (encode_err) {
                 err = error_combine(encode_err, err);
                 self->state = STATE_FAIL;
@@ -538,10 +633,11 @@ static error_t *url_parser_auth(url_parser_t *self) {
 
         slice_t buf = url_parser_slice(self);
 
-        for (size_t i = 0; i < buf.len + 1; ++i) {
+        for (size_t i = 0; i < buf.len; ++i) {
             string_pop(self->buf);
         }
 
+        self->slice_start = string_len(self->buf);
         self->pos -= buf.len + 1;
         self->state = STATE_HOST;
     } else {
@@ -570,7 +666,7 @@ static error_t *url_parser_host(url_parser_t *self) {
             goto fail;
         }
 
-        self->result->host = url_parser_slice(self);
+        self->result->host = url_parser_slice_to_region(self, url_parser_slice(self));
         self->result->host_null = false;
         self->state = STATE_PORT;
     } else if (c == EOF || c == '/' || c == '?' || c == '#' || (self->special && c == '\\')) {
@@ -582,7 +678,7 @@ static error_t *url_parser_host(url_parser_t *self) {
             goto fail;
         }
 
-        self->result->host = url_parser_slice(self);
+        self->result->host = url_parser_slice_to_region(self, url_parser_slice(self));
         self->result->host_null = false;
         self->state = STATE_PATH;
     } else {
@@ -650,7 +746,8 @@ fail:
 static error_t *url_parser_file(url_parser_t *self) {
     error_t *err = NULL;
 
-    if (slice_cmp(self->result->scheme, slice_from_cstr("file")) != 0) {
+    if (slice_cmp(url_parser_region_to_slice(self, self->result->scheme),
+            slice_from_cstr("file")) != 0) {
         err = error_from_common(string_appendf(self->buf, "file"));
 
         if (err) {
@@ -658,10 +755,10 @@ static error_t *url_parser_file(url_parser_t *self) {
             goto fail;
         }
 
-        self->result->scheme = url_parser_slice(self);
+        self->result->scheme = url_parser_slice_to_region(self, url_parser_slice(self));
     }
 
-    self->result->host = slice_empty();
+    self->result->host = region_empty();
     self->result->host_null = false;
     int c = url_parser_c(self);
 
@@ -719,11 +816,11 @@ static error_t *url_parser_file_host(url_parser_t *self) {
             err = error_from_cstr("A Windows drive letter cannot be used in a URL", NULL);
             self->state = STATE_PATH;
         } else if (url_parser_buf_len(self) == 0) {
-            self->result->host = slice_empty();
+            self->result->host = region_empty();
             self->result->host_null = false;
             self->state = STATE_PATH_START;
         } else {
-            self->result->host = url_parser_slice(self);
+            self->result->host = url_parser_slice_to_region(self, url_parser_slice(self));
             self->result->host_null = false;
             self->state = STATE_PATH_START;
         }
@@ -756,11 +853,11 @@ static error_t *url_parser_path_start(url_parser_t *self) {
             --self->pos;
         }
     } else if (c == '?') {
-        self->result->query = slice_empty();
+        self->result->query = region_empty();
         self->result->query_null = false;
         self->state = STATE_QUERY;
     } else if (c == '#') {
-        self->result->fragment = slice_empty();
+        self->result->fragment = region_empty();
         self->result->fragment_null = false;
         self->state = STATE_FRAGMENT;
     } else if (c != EOF) {
@@ -784,7 +881,8 @@ static error_t *url_parser_path(url_parser_t *self) {
             err = error_from_cstr("Backslashes are not allowed in a URL", NULL);
         }
 
-        if (slice_cmp(self->result->scheme, slice_from_cstr("file")) == 0 &&
+        if (slice_cmp(url_parser_region_to_slice(self, self->result->scheme),
+                    slice_from_cstr("file")) == 0 &&
                 self->result->path.len == 0 &&
                 is_windows_drive_letter(url_parser_buf(self))) {
             *string_get_mut(self->buf, string_len(self->buf) - 1) = ':';
@@ -793,19 +891,19 @@ static error_t *url_parser_path(url_parser_t *self) {
         slice_t buf = url_parser_slice(self);
 
         if (self->result->path.len == 0) {
-            self->result->path = buf;
+            self->result->path = url_parser_slice_to_region(self, buf);
         } else {
             self->result->path.len += buf.len;
         }
 
         if (c == '?') {
-            self->result->query = slice_empty();
+            self->result->query = region_empty();
             self->result->query_null = false;
             self->state = STATE_QUERY;
         }
 
         if (c == '#') {
-            self->result->fragment = slice_empty();
+            self->result->fragment = region_empty();
             self->result->fragment_null = false;
             self->state = STATE_FRAGMENT;
         }
@@ -837,13 +935,13 @@ static error_t *url_parser_opaque_path(url_parser_t *self) {
     int c = url_parser_c(self);
 
     if (c == '?') {
-        self->result->path = url_parser_slice(self);
-        self->result->query = slice_empty();
+        self->result->path = url_parser_slice_to_region(self, url_parser_slice(self));
+        self->result->query = region_empty();
         self->result->query_null = false;
         self->state = STATE_QUERY;
     } else if (c == '#') {
-        self->result->path = url_parser_slice(self);
-        self->result->fragment = slice_empty();
+        self->result->path = url_parser_slice_to_region(self, url_parser_slice(self));
+        self->result->fragment = region_empty();
         self->result->fragment_null = false;
         self->state = STATE_FRAGMENT;
     } else {
@@ -876,11 +974,11 @@ static error_t *url_parser_query(url_parser_t *self) {
     int c = url_parser_c(self);
 
     if (c == '#' || c == EOF) {
-        self->result->query = url_parser_slice(self);
+        self->result->query = url_parser_slice_to_region(self, url_parser_slice(self));
         self->result->query_null = false;
 
         if (c == '#') {
-            self->result->fragment = slice_empty();
+            self->result->fragment = region_empty();
             self->result->fragment_null = false;
             self->state = STATE_FRAGMENT;
         }
@@ -913,7 +1011,7 @@ static error_t *url_parser_fragment(url_parser_t *self) {
     int c = url_parser_c(self);
 
     if (c == EOF) {
-        self->result->fragment = url_parser_slice(self);
+        self->result->fragment = url_parser_slice_to_region(self, url_parser_slice(self));
         self->result->fragment_null = false;
     } else {
         if (!is_url_ascii(c) && c != '%') {
@@ -940,8 +1038,9 @@ fail:
 // A partial implementation of https://url.spec.whatwg.org/#concept-basic-url-parser
 //
 // Doesn't support relative URLs because I don't care about them.
-error_t *url_parse(slice_t slice, url_t *result) {
+error_t *url_parse(slice_t slice, url_t *result, bool *fatal) {
     error_t *err = NULL;
+    *fatal = true;
 
     string_t input;
     err = error_from_common(string_from_slice(slice.base, slice.len, &input));
@@ -951,27 +1050,28 @@ error_t *url_parse(slice_t slice, url_t *result) {
     err = error_from_common(string_new(&buf));
     if (err) goto buf_new_fail;
 
-    url_t url = {
-        .buf = buf,
-        .scheme = slice_empty(),
-        .username = slice_empty(),
-        .password = slice_empty(),
-        .host = slice_empty(),
+    err = error_combine(err, url_remove_trailing(&input));
+    err = error_combine(err, url_remove_tab_nl(&input));
+
+    // the slices should point to the buffer **after** the parsing is done
+    // since the buffer keeps being reallocated, we have to store the indices during parsing
+    url_region_t region_url = {
+        .scheme = region_empty(),
+        .username = region_empty(),
+        .password = region_empty(),
+        .host = region_empty(),
         .port = 0,
-        .path = slice_empty(),
-        .query = slice_empty(),
-        .fragment = slice_empty(),
+        .path = region_empty(),
+        .query = region_empty(),
+        .fragment = region_empty(),
         .host_null = true,
         .port_null = true,
         .query_null = true,
         .fragment_null = true,
     };
 
-    err = error_combine(err, url_remove_trailing(&input));
-    err = error_combine(err, url_remove_tab_nl(&input));
-
     url_parser_t parser = {
-        .result = result,
+        .result = &region_url,
         .input = &input,
         .buf = &buf,
         .slice_start = 0,
@@ -1060,10 +1160,29 @@ error_t *url_parse(slice_t slice, url_t *result) {
         ++parser.pos;
     } while (!is_eof(&parser));
 
-    *result = url;
+    *result = (url_t) {
+        .buf = buf,
+        .scheme = url_parser_region_to_slice(&parser, region_url.scheme),
+        .username = url_parser_region_to_slice(&parser, region_url.username),
+        .password = url_parser_region_to_slice(&parser, region_url.password),
+        .host = url_parser_region_to_slice(&parser, region_url.host),
+        .port = region_url.port,
+        .path = url_parser_region_to_slice(&parser, region_url.path),
+        .query = url_parser_region_to_slice(&parser, region_url.query),
+        .fragment = url_parser_region_to_slice(&parser, region_url.fragment),
+        .host_null = region_url.host_null,
+        .port_null = region_url.port_null,
+        .query_null = region_url.query_null,
+        .fragment_null = region_url.fragment_null,
+    };
+
+    *fatal = false;
+    log_url(result);
 
 parser_fail:
-    string_free(&buf);
+    if (*fatal) {
+        string_free(&buf);
+    }
 
 buf_new_fail:
     string_free(&input);

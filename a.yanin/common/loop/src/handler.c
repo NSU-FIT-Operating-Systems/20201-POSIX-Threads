@@ -66,6 +66,10 @@ poll_flags_t handler_set_pending_mask(handler_t *self, poll_flags_t flags) {
     return prev;
 }
 
+loop_t *handler_loop(handler_t *self) {
+    return self->loop;
+}
+
 void handler_lock(handler_t *self) {
     assert_mutex_lock(&self->mtx);
 }

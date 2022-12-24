@@ -40,6 +40,7 @@ common_sources = [
   'src/main.c',
   'src/server.c',
   'src/url.c',
+  'src/upstream.c',
 ]
 
 st_sources = [

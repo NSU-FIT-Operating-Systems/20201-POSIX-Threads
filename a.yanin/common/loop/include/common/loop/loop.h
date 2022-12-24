@@ -149,7 +149,11 @@ void handler_init(handler_t *self, handler_vtable_t const *vtable, int fd);
 
 // Frees a handler.
 //
-// Also dispatches to the `free` method in the handle vtable.
+// The handler is freed in the following fashion:
+// 1. First, if the handler has an `on_free` callback set, it's invoked.
+// 2. The `free` method specified in the vtable is called.
+// 3. The base handler struct is freed.
+// 4. `free(self)` is called.
 void handler_free(handler_t *self);
 
 // Unregisters a handler from a loop.
@@ -178,6 +182,11 @@ poll_flags_t handler_pending_mask(handler_t const *self);
 //
 // This method must be called from a synchronized context.
 poll_flags_t handler_set_pending_mask(handler_t *self, poll_flags_t flags);
+
+// Returns a pointer to the loop this handler belongs to.
+//
+// Returns `NULL` if the handler has not been registered yet.
+loop_t *handler_loop(handler_t *self);
 
 // Lock the handler, establishing a synchronized context.
 //

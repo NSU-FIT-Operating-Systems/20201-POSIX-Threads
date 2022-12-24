@@ -7,11 +7,11 @@ static void error_format_indent(size_t level, string_t *buf) {
 
 static void error_format_backtrace(backtrace_t const *backtrace, size_t level, string_t *buf) {
     string_t prefix_str;
-    char const *prefix = "\n  at ";
+    char const *prefix = "\n    at ";
     bool prefix_allocated = false;
 
     if (string_new(&prefix_str) == COMMON_ERROR_CODE_OK) {
-        error_format_indent(level + 1, &prefix_str);
+        error_format_indent(level + 2, &prefix_str);
         string_appendf(&prefix_str, "at ");
         prefix = string_as_cptr(&prefix_str);
         prefix_allocated = true;
@@ -42,7 +42,7 @@ static void error_format_impl(
         error_format_indent(level, buf);
         self->vtable->description(self, buf);
 
-        if (verbosity & ERROR_VERBOSITY_BACKTRACE) {
+        if (self->backtrace && (verbosity & ERROR_VERBOSITY_BACKTRACE)) {
             error_format_backtrace(self->backtrace, level, buf);
         }
     }

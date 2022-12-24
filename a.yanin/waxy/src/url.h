@@ -45,4 +45,4 @@ error_t *url_copy(url_t const *url, url_t *result);
 //
 // Assumes the input is valid UTF-8.
 // It won't break if it's not, but it may percent-encode bytes incorrectly.
-error_t *url_parse(slice_t slice, url_t *result);
+error_t *url_parse(slice_t slice, url_t *result, bool *fatal);

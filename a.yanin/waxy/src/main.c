@@ -62,6 +62,7 @@ int main(int argc, char **argv) {
 
 sigmask_unblock_fail:
     server_ref = NULL;
+    server_stop(&server);
     server_free(&server);
 
 server_new_fail:
