@@ -101,6 +101,7 @@ static error_t *client_cache_on_write(
     if (buf->eof) {
         // the shutdown should not matter, I think, except for having the client notified of the EOF
         // earlier, so it's not a bad thing either
+        log_printf(LOG_DEBUG, "Closing the connection");
         tcp_shutdown_output(handler);
         handler_unregister((handler_t *) handler);
     }
@@ -119,8 +120,10 @@ static error_t *client_cache_on_write_error(
     size_t
 ) {
     assert(slice_count == 1);
-    // the base pointer was dervied from a non-const pointer
-    free((char *) slices[0].base);
+
+    // see the comment in `client_cache_on_write`
+    cache_buf_t *buf = (cache_buf_t *)((char *) slices - offsetof(cache_buf_t, slice));
+    free(buf);
 
     // the tcp handler's generic error handler will free everything
     return err;
@@ -146,6 +149,7 @@ static error_t *client_cache_on_read(cache_rd_t *rd, loop_t *) {
         .base = buf->buf,
         .len = 0,
     };
+    buf->eof = false;
 
     size_t count = cache_rd_read(rd, buf->buf, CACHE_BUFFER_SIZE, &buf->eof);
     buf->slice.len = count;
@@ -156,6 +160,7 @@ static error_t *client_cache_on_read(cache_rd_t *rd, loop_t *) {
     handler_unlock((handler_t *) rd);
     handler_lock((handler_t *) ctx->tcp);
 
+    log_printf(LOG_DEBUG, "Sent %zu to the client", count);
     err = tcp_write(ctx->tcp, 1, &buf->slice,
         client_cache_on_write, client_cache_on_write_error);
 
@@ -327,7 +332,6 @@ static error_t *client_process_request(
         if (err) goto fail;
     }
 
-    // FIXME: doesn't work with IP addresses for some reason
     url_t url = {0};
     bool fatal = false;
     err = url_parse(path, &url, &fatal);

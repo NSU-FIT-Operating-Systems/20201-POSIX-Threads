@@ -112,14 +112,6 @@ static error_t *upstream_on_read(loop_t *, tcp_handler_t *handler, slice_t slice
             last_len
         );
 
-        log_printf(LOG_DEBUG, "parsing (len = %zu, last_len = %zu, count = %d): %.*s",
-            string_len(&ctx->buf),
-            last_len,
-            count,
-            (int) string_len(&ctx->buf),
-            string_as_cptr(&ctx->buf)
-        );
-
         if (count == -2) {
             // partial data
             if (tcp_is_eof(handler)) {
@@ -168,6 +160,7 @@ static error_t *upstream_on_read(loop_t *, tcp_handler_t *handler, slice_t slice
         }
     }
 
+    log_printf(LOG_DEBUG, "Written %zu bytes to the cache entry", slice.len);
     err = cache_wr_write(ctx->wr, slice);
     if (err) goto unregister;
 

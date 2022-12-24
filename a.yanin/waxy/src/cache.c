@@ -556,16 +556,16 @@ size_t cache_rd_read(cache_rd_t *self, char *buf, size_t size, bool *eof) {
         size = unread_count;
     }
 
-    memcpy(buf, string_as_cptr(&entry->buf) + self->count, unread_count);
-    self->count += unread_count;
+    memcpy(buf, string_as_cptr(&entry->buf) + self->count, size);
+    self->count += size;
 
-    if (entry->state != CACHE_ENTRY_PARTIAL) {
+    if (entry->state != CACHE_ENTRY_PARTIAL && self->count >= string_len(&entry->buf)) {
         *eof = true;
     }
 
     assert_mutex_unlock(&entry->mtx);
 
-    return unread_count;
+    return size;
 }
 
 void cache_wr_free(cache_wr_t *self) {

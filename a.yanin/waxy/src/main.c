@@ -1,3 +1,6 @@
+#include <stdlib.h>
+#include <string.h>
+
 #include <common/log/log.h>
 #include <common/posix/signal.h>
 
@@ -22,6 +25,34 @@ static void print_usage(void) {
     fputs("Usage: waxy [<port>]\n", stderr);
 }
 
+static void set_log_level(void) {
+    char const *env = getenv("WAXY_LOG");
+
+    if (env == NULL) {
+        env = "info";
+    }
+
+    if (strcmp(env, "debug") == 0) {
+        log_set_level(LOG_DEBUG);
+    } else if (strcmp(env, "info") == 0) {
+        log_set_level(LOG_INFO);
+    } else if (strcmp(env, "warn") == 0) {
+        log_set_level(LOG_WARN);
+    } else if (strcmp(env, "err") == 0) {
+        log_set_level(LOG_ERR);
+    } else if (strcmp(env, "fatal") == 0) {
+        log_set_level(LOG_FATAL);
+    } else {
+        log_set_level(LOG_INFO);
+        log_printf(
+            LOG_WARN,
+            "WAXY_LOG is set to unknown value `%s` (expected `debug`, `info`, `warn`, `err`, or `fatal`)",
+            env
+        );
+        log_printf(LOG_INFO, "Defaulting to INFO");
+    }
+}
+
 int main(int argc, char **argv) {
     error_t *err = NULL;
 
@@ -36,6 +67,8 @@ int main(int argc, char **argv) {
 
         return 1;
     }
+
+    set_log_level();
 
     sigset_t signal_set;
     sigemptyset(&signal_set);

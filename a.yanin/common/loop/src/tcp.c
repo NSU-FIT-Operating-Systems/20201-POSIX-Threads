@@ -635,7 +635,7 @@ bool tcp_is_eof(tcp_handler_t const *self) {
 error_t *tcp_write(
     tcp_handler_t *self,
     size_t slice_count,
-    slice_t const slices[static slice_count],
+    slice_t const *slices,
     tcp_on_write_cb_t on_write,
     tcp_on_write_error_cb_t on_error
 ) {
