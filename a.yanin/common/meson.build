@@ -59,5 +59,8 @@ subdir('executor')
 # A single-threaded blocking executor.
 subdir('executor.single')
 
+# A thread-pool executor.
+subdir('executor.thread-pool')
+
 # An asynchronous event loop.
 subdir('loop')
