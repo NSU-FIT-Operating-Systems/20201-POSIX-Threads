@@ -28,6 +28,7 @@ extern char const *const log_prefix_info;
 extern char const *const log_prefix_warn;
 extern char const *const log_prefix_err;
 extern char const *const log_prefix_fatal;
+char const *log_prefix_for_level(log_level_t log_level);
 
 bool log_is_sync(void);
 void log_set_sync(void);

@@ -253,6 +253,8 @@ static error_t *loop_prepare_pollfd_process_handler(
         *has_forced_handlers = true;
     }
 
+    log_printf(LOG_DEBUG, "Registered %d for poll", handler->fd);
+
 meta_fail:
     arc_handler_free(handler_arc_shared);
 
@@ -271,7 +273,10 @@ static error_t *loop_prepare_pollfd(
 ) {
     error_t *err = NULL;
 
+    log_printf(LOG_DEBUG, "Preparing pollfd entries");
+
     if (self->stopped) {
+        log_printf(LOG_DEBUG, "The loop has been stopped");
         *empty = true;
 
         return err;
@@ -297,6 +302,8 @@ static error_t *loop_prepare_pollfd(
         err = loop_prepare_pollfd_process_handler(self, pollfd, meta, arc, has_forced_handlers);
         if (err) goto fail;
     }
+
+    log_printf(LOG_DEBUG, "Prepared %zu pollfd entries", vec_pollfd_len(pollfd));
 
 fail:
     return err;
@@ -356,6 +363,8 @@ fail:
 }
 
 static error_t *loop_handler_task_cb(task_ctx_t *ctx) {
+    log_printf(LOG_DEBUG, "Running a task");
+
     handler_t *handler = arc_handler_get(ctx->handler);
 
     handler_lock(handler);
@@ -418,18 +427,23 @@ static error_t *loop_dispatch_task(loop_t *self, pollfd_meta_t *meta_entry) {
         &(loop_handler_status_t) { LOOP_HANDLER_READY },
         LOOP_HANDLER_QUEUED
     );
-    executor_submission_t status = executor_submit(self->executor, (task_t) {
-        .cb = (task_cb_t) loop_handler_task_cb,
-        .data = (void *) ctx,
-    });
 
-    switch (status) {
-    case EXECUTOR_SUBMITTED:
-        break;
+    if (handler == (handler_t *) self->notify) {
+        err = loop_handler_task_cb(ctx);
+    } else {
+        executor_submission_t status = executor_submit(self->executor, (task_t) {
+            .cb = (task_cb_t) loop_handler_task_cb,
+            .data = (void *) ctx,
+        });
 
-    case EXECUTOR_DROPPED:
-        err = error_from_cstr("A handler task has been rejected by the executor", NULL);
-        goto submit_fail;
+        switch (status) {
+        case EXECUTOR_SUBMITTED:
+            break;
+
+        case EXECUTOR_DROPPED:
+            err = error_from_cstr("A handler task has been rejected by the executor", NULL);
+            goto submit_fail;
+        }
     }
 
     return err;
@@ -466,7 +480,13 @@ static error_t *loop_process_task_results(loop_t *self) {
     assert_mutex_lock(&self->error_mtx);
 
     for (size_t i = 0; i < vec_error_len(&self->errors); ++i) {
-        err = error_combine(err, *vec_error_get(&self->errors, i));
+        error_t *task_err = *vec_error_get(&self->errors, i);
+
+        if (i > 0) {
+            err = error_combine(err, error_wrap("Another handler has failed", task_err));
+        } else {
+            err = error_combine(err, task_err);
+        }
     }
 
     vec_error_clear(&self->errors);
@@ -539,5 +559,6 @@ void loop_stop(loop_t *self) {
 }
 
 void loop_interrupt(loop_t *self) {
+    log_printf(LOG_DEBUG, "Interrupting the loop");
     notify_post(self->notify);
 }

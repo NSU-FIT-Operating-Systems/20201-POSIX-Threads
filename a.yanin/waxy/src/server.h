@@ -19,4 +19,5 @@ typedef struct server {
 error_t *server_new(char const *port, size_t cache_size, server_t *result);
 void server_free(server_t *self);
 void server_stop(server_t *self);
+void server_await_termination(server_t *self);
 error_t *server_run(server_t *self);

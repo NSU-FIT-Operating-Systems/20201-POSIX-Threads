@@ -86,8 +86,8 @@ error_t *notify_new(notify_t **result) {
     err = error_from_posix(wrapper_pipe(&rd_fd, &wr_fd));
     if (err) goto pipe_fail;
 
-    err = error_wrap("Could not switch the write end to non-blocking mode", error_from_posix(
-        wrapper_fcntli(wr_fd, F_SETFL, O_NONBLOCK)));
+    err = error_wrap("Could not switch the read end to non-blocking mode", error_from_posix(
+        wrapper_fcntli(rd_fd, F_SETFL, O_NONBLOCK)));
     if (err) goto fcntli_fail;
 
     err = error_wrap("Could not switch the write end to non-blocking mode", error_from_posix(
@@ -141,7 +141,6 @@ bool notify_post(notify_t *self) {
 
 void notify_wakeup(notify_t *self) {
     ssize_t written_count = -1;
-    log_printf(LOG_DEBUG, "Requesting an unconditional wakeup");
     posix_err_t status = wrapper_write(self->wr_fd, "2", 1, &written_count);
 
     if (status.errno_code != EWOULDBLOCK && status.errno_code != EAGAIN) {

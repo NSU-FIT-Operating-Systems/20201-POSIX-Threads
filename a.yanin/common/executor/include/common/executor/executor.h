@@ -23,6 +23,7 @@ typedef struct executor executor_t;
 typedef void (*executor_vtable_free_t)(executor_t *self);
 typedef executor_submission_t (*executor_vtable_submit_t)(executor_t *self, task_t task);
 typedef void (*executor_vtable_shutdown_t)(executor_t *self);
+typedef void (*executor_vtable_await_termination_t)(executor_t *self);
 
 typedef struct {
     // Frees the resources associated with the executor implementation.
@@ -37,6 +38,9 @@ typedef struct {
     //
     // Any tasks submitted afterwards will be rejected.
     executor_vtable_shutdown_t shutdown;
+
+    // Blocks the currents thread until the last task finishes executing.
+    executor_vtable_await_termination_t await_termination;
 } executor_vtable_t;
 
 // An abstract executor struct included in concrete executor implementations.
@@ -63,3 +67,8 @@ executor_submission_t executor_submit(executor_t *self, task_t task);
 //
 // Dispatches to the `shutdown` method of the executor vtable.
 void executor_shutdown(executor_t *self);
+
+// Awaits termination of the executor.
+//
+// Dispatches to the `await_termination` method of the executor vtable.
+void executor_await_termination(executor_t *self);

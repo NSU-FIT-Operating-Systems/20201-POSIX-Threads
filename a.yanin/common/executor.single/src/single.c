@@ -11,9 +11,9 @@ struct executor_single {
     bool shut;
 };
 
-void executor_single_free(executor_single_t *) {}
+static void executor_single_free(executor_single_t *) {}
 
-executor_submission_t executor_single_submit(executor_single_t *self, task_t task) {
+static executor_submission_t executor_single_submit(executor_single_t *self, task_t task) {
     if (self->shut) {
         return EXECUTOR_DROPPED;
     }
@@ -46,14 +46,17 @@ executor_submission_t executor_single_submit(executor_single_t *self, task_t tas
     return EXECUTOR_SUBMITTED;
 }
 
-void executor_single_shutdown(executor_single_t *self) {
+static void executor_single_shutdown(executor_single_t *self) {
     self->shut = true;
 }
+
+static void executor_single_await_terminaion(executor_single_t *) {}
 
 static executor_vtable_t const executor_single_vtable = {
     .free = (executor_vtable_free_t) executor_single_free,
     .submit = (executor_vtable_submit_t) executor_single_submit,
     .shutdown = (executor_vtable_shutdown_t) executor_single_shutdown,
+    .await_termination = (executor_vtable_await_termination_t) executor_single_await_terminaion,
 };
 
 error_t *executor_single_new(char const *name, executor_single_t **result) {

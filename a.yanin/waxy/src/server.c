@@ -166,6 +166,8 @@ error_t *server_new(char const *port, size_t cache_size, server_t *result) {
         .state = SERVER_STATE_BIND,
     };
 
+    log_printf(LOG_DEBUG, "Starting a listening socket");
+
     tcp_handler_server_t *serv = NULL;
     err = server_new_tcp_serv(ctx, &serv);
     if (err) goto serv_new_fail;
@@ -210,6 +212,10 @@ executor_new_fail:
 
 void server_stop(server_t *self) {
     loop_stop(self->loop);
+}
+
+void server_await_termination(server_t *self) {
+    executor_await_termination(self->executor);
 }
 
 void server_free(server_t *self) {

@@ -20,3 +20,7 @@ executor_submission_t executor_submit(executor_t *self, task_t task) {
 void executor_shutdown(executor_t *self) {
     self->vtable->shutdown(self);
 }
+
+void executor_await_termination(executor_t *self) {
+    self->vtable->await_termination(self);
+}

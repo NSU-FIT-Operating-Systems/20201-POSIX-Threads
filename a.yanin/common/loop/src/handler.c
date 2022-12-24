@@ -71,10 +71,12 @@ loop_t *handler_loop(handler_t *self) {
 }
 
 void handler_lock(handler_t *self) {
+    log_printf(LOG_DEBUG, "Locking handler %p", (void *) self);
     assert_mutex_lock(&self->mtx);
 }
 
 void handler_unlock(handler_t *self) {
+    log_printf(LOG_DEBUG, "Unlocking handler %p", (void *) self);
     assert_mutex_unlock(&self->mtx);
 }
 

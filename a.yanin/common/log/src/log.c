@@ -24,10 +24,10 @@ char const *const log_prefix_warn = CSI SGR_BOLD SGR CSI SGR_YELLOW SGR "WARN" C
 char const *const log_prefix_err = CSI SGR_BOLD SGR CSI SGR_RED SGR "ERR" CSI SGR;
 char const *const log_prefix_fatal = CSI SGR_BOLD SGR CSI SGR_RED SGR "FATAL" CSI SGR;
 
-static void log_print_prefix(log_level_t level) {
+char const *log_prefix_for_level(log_level_t log_level) {
     char const *prefix = NULL;
 
-    switch (level) {
+    switch (log_level) {
     case LOG_DEBUG:
         prefix = log_prefix_debug;
         break;
@@ -48,7 +48,11 @@ static void log_print_prefix(log_level_t level) {
         prefix = log_prefix_fatal;
     }
 
-    fprintf(stderr, "%s: ", prefix);
+    return prefix;
+}
+
+static void log_print_prefix(log_level_t level) {
+    fprintf(stderr, "%s: ", log_prefix_for_level(level));
 }
 
 thread_local log_hook_t log_hook = log_print_prefix;

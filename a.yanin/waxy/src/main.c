@@ -73,6 +73,7 @@ int main(int argc, char **argv) {
     }
 
     set_log_level();
+    log_set_sync();
 
     sigset_t signal_set;
     sigemptyset(&signal_set);
@@ -100,6 +101,7 @@ int main(int argc, char **argv) {
 sigmask_unblock_fail:
     server_ref = NULL;
     server_stop(&server);
+    server_await_termination(&server);
     server_free(&server);
 
 server_new_fail:

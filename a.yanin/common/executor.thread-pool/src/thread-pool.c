@@ -1,6 +1,7 @@
 #include <common/executor/thread-pool.h>
 
 #include <common/error-codes/adapter.h>
+#include <stdio.h>
 
 #include "util.h"
 
@@ -13,6 +14,9 @@
 #define DLIST_LABEL task
 #define DLIST_CONFIG (COLLECTION_DECLARE | COLLECTION_DEFINE | COLLECTION_STATIC)
 #include <common/collections/dlist.h>
+
+static thread_local size_t current_thread_idx = 0;
+static thread_local char const *current_pool_name = NULL;
 
 typedef enum {
     // The thread pool is initializing.
@@ -41,6 +45,18 @@ struct executor_thread_pool {
     executor_thread_pool_on_error_cb_t on_error;
 };
 
+static void worker_thread_log_hook(log_level_t level) {
+    fprintf(stderr, "[Thread pool %s/%zu] %s: ",
+        current_pool_name, current_thread_idx, log_prefix_for_level(level));
+}
+
+static void executor_thread_pool_await_termination(executor_thread_pool_t *self) {
+    for (size_t i = 0; i < vec_pthread_len(&self->threads); ++i) {
+        pthread_t thread_id = *vec_pthread_get(&self->threads, i);
+        pthread_join(thread_id, NULL);
+    }
+}
+
 static void *worker_thread(void *data) {
     executor_thread_pool_t *ex = data;
 
@@ -50,7 +66,16 @@ static void *worker_thread(void *data) {
         assert_cond_wait(&ex->cond, &ex->mtx);
     }
 
-    // TODO: set the log prefix
+    for (size_t i = 0; i < vec_pthread_len(&ex->threads); ++i) {
+        if (pthread_equal(*vec_pthread_get(&ex->threads, i), pthread_self())) {
+            current_thread_idx = i;
+
+            break;
+        }
+    }
+
+    current_pool_name = ex->pool_name;
+    log_hook = worker_thread_log_hook;
 
     while (true) {
         while (ex->state == THREAD_POOL_RUNNING && dlist_task_len(&ex->tasks) == 0) {
@@ -61,10 +86,15 @@ static void *worker_thread(void *data) {
             break;
         }
 
+        log_printf(LOG_DEBUG, "dlist_task_len = %zu", dlist_task_len(&ex->tasks));
         task_t task = dlist_task_remove(&ex->tasks, dlist_task_head_mut(&ex->tasks));
+        log_printf(LOG_DEBUG, "Got a task from the queue");
+        log_printf(LOG_DEBUG, "dlist_task_len = %zu", dlist_task_len(&ex->tasks));
 
         assert_mutex_unlock(&ex->mtx);
         error_t *err = task.cb(task.data);
+
+        log_printf(LOG_DEBUG, "Task finished");
 
         if (err) {
             assert_mutex_lock(&ex->mtx);
@@ -99,6 +129,7 @@ static void *worker_thread(void *data) {
     }
 
     assert_mutex_unlock(&ex->mtx);
+    log_printf(LOG_DEBUG, "A child thread is exiting");
 
     return NULL;
 }
@@ -109,10 +140,7 @@ static void executor_thread_pool_free(executor_thread_pool_t *self) {
     pthread_cond_broadcast(&self->cond);
     assert_mutex_unlock(&self->mtx);
 
-    for (size_t i = 0; i < vec_pthread_len(&self->threads); ++i) {
-        pthread_t thread_id = *vec_pthread_get(&self->threads, i);
-        pthread_join(thread_id, NULL);
-    }
+    executor_thread_pool_await_termination(self);
 
     dlist_task_free(&self->tasks);
     pthread_cond_destroy(&self->cond);
@@ -173,6 +201,8 @@ static executor_vtable_t const executor_thread_pool_vtable = {
     .free = (executor_vtable_free_t) executor_thread_pool_free,
     .submit = (executor_vtable_submit_t) executor_thread_pool_submit,
     .shutdown = (executor_vtable_shutdown_t) executor_thread_pool_shutdown,
+    .await_termination =
+        (executor_vtable_await_termination_t) executor_thread_pool_await_termination,
 };
 
 error_t *executor_thread_pool_new(
@@ -215,6 +245,7 @@ error_t *executor_thread_pool_new(
     self->on_error = NULL;
 
     executor_init(&self->executor, &executor_thread_pool_vtable);
+    assert_mutex_lock(&self->mtx);
 
     for (size_t i = 0; i < self->size; ++i) {
         pthread_t thread_id;
@@ -227,8 +258,6 @@ error_t *executor_thread_pool_new(
 
         if (err) break;
     }
-
-    assert_mutex_lock(&self->mtx);
 
     if (err) {
         self->state = THREAD_POOL_STOPPING;
