@@ -160,7 +160,6 @@ static error_t *upstream_on_read(loop_t *, tcp_handler_t *handler, slice_t slice
         }
     }
 
-    log_printf(LOG_DEBUG, "Written %zu bytes to the cache entry", slice.len);
     err = cache_wr_write(ctx->wr, slice);
     if (err) goto unregister;
 

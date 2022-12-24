@@ -88,7 +88,7 @@ static error_t *pipe_handler_process_write_req(
     pipe_handler_wr_t *self,
     loop_t *loop,
     error_t *err,
-    bool *processed
+    io_process_result_t *processed
 ) {
     return io_process_write_req(
         self,
@@ -110,17 +110,27 @@ static error_t *pipe_handler_wr_process(pipe_handler_wr_t *self, loop_t *loop, p
     }
 
     while (vec_wrreq_len(&self->write_reqs) > 0) {
-        bool processed = false;
+        io_process_result_t processed = false;
         err = pipe_handler_process_write_req(self, loop, err, &processed);
 
-        if (processed) {
-            // see the note in tcp.c
+        switch (processed) {
+        case IO_PROCESS_FINISHED:
             vec_wrreq_remove(&self->write_reqs, 0);
+            [[fallthrough]];
 
-            break;
+        case IO_PROCESS_PARTIAL:
+            if (!err) {
+                goto out;
+            }
+
+            [[fallthrough]];
+
+        case IO_PROCESS_AGAIN:
+            continue;
         }
     }
 
+out:
     if (vec_wrreq_len(&self->write_reqs) == 0) {
         handler_set_pending_mask(&self->handler, 0);
     }

@@ -73,7 +73,6 @@ int main(int argc, char **argv) {
     }
 
     set_log_level();
-    log_set_sync();
 
     sigset_t signal_set;
     sigemptyset(&signal_set);

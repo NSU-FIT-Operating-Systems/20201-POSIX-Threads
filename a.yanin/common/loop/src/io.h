@@ -18,11 +18,17 @@ typedef struct {
     size_t written_count;
 } write_req_t;
 
+typedef enum {
+    IO_PROCESS_FINISHED,
+    IO_PROCESS_PARTIAL,
+    IO_PROCESS_AGAIN,
+} io_process_result_t;
+
 error_t *io_process_write_req(
     void *self,
     loop_t *loop,
     error_t *err,
-    bool *processed,
+    io_process_result_t *processed,
     int fd,
     write_req_t *(*get_req)(void *self),
     error_t *(*on_write)(void *self, loop_t *loop, write_req_t *req),

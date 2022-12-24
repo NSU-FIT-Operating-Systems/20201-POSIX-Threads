@@ -115,28 +115,26 @@ void loop_free(loop_t *self) {
     error_assert(error_wrap("The loop must have been stopped",
         OK_IF(!self->started || self->stopped)));
 
-    pthread_mutex_destroy(&self->error_mtx);
-    pthread_mutex_destroy(&self->pending_mtx);
+    for (size_t i = 0; i < vec_handler_len(&self->pending_handlers); ++i) {
+        arc_handler_free(*vec_handler_get(&self->pending_handlers, i));
+    }
+
+    for (size_t ri = 0; ri < vec_handler_len(&self->handlers); ++ri) {
+        size_t i = vec_handler_len(&self->handlers) - ri - 1;
+
+        arc_handler_t *handler = *vec_handler_get(&self->handlers, i);
+        arc_handler_free(handler);
+    }
 
     for (size_t i = 0; i < vec_error_len(&self->errors); ++i) {
         error_free(vec_error_get_mut(&self->errors, i));
     }
 
+    pthread_mutex_destroy(&self->error_mtx);
+    pthread_mutex_destroy(&self->pending_mtx);
+
     vec_error_free(&self->errors);
-
-    for (size_t i = 0; i < vec_handler_len(&self->pending_handlers); ++i) {
-        arc_handler_free(*vec_handler_get(&self->pending_handlers, i));
-    }
-
     vec_handler_free(&self->pending_handlers);
-
-    for (size_t i = 0; i < vec_handler_len(&self->handlers); ++i) {
-        arc_handler_t *handler = *vec_handler_get(&self->handlers, i);
-        error_assert(error_wrap("loop_free called with a shared task",
-            OK_IF(arc_handler_count(handler) == 1)));
-        arc_handler_free(handler);
-    }
-
     vec_handler_free(&self->handlers);
 
     free(self);
@@ -152,12 +150,12 @@ error_t *loop_register(loop_t *self, handler_t *handler) {
     err = OK_IF(arc != NULL);
     if (err) goto fail;
 
-    err = error_wrap(
-        "Could not insert the handle in the pending queue",
-        error_from_common(
-            vec_handler_push(&self->pending_handlers, arc)));
-    pushed = true;
+    err = error_wrap("Could not insert the handle in the pending queue", error_from_common(
+        vec_handler_push(&self->pending_handlers, arc)));
     if (err) goto fail;
+
+    pushed = true;
+    handler->loop = self;
 
 fail:
     assert_mutex_unlock(&self->pending_mtx);
@@ -194,8 +192,6 @@ static error_t *loop_process_registrations(loop_t *self) {
 
         err = error_from_common(vec_handler_push(&self->handlers, handler));
         if (err) goto push_fail;
-
-        arc_handler_get(handler)->loop = self;
     }
 
 push_fail:
@@ -253,8 +249,6 @@ static error_t *loop_prepare_pollfd_process_handler(
         *has_forced_handlers = true;
     }
 
-    log_printf(LOG_DEBUG, "Registered %d for poll", handler->fd);
-
 meta_fail:
     arc_handler_free(handler_arc_shared);
 
@@ -272,8 +266,6 @@ static error_t *loop_prepare_pollfd(
     bool *has_forced_handlers
 ) {
     error_t *err = NULL;
-
-    log_printf(LOG_DEBUG, "Preparing pollfd entries");
 
     if (self->stopped) {
         log_printf(LOG_DEBUG, "The loop has been stopped");
@@ -302,8 +294,6 @@ static error_t *loop_prepare_pollfd(
         err = loop_prepare_pollfd_process_handler(self, pollfd, meta, arc, has_forced_handlers);
         if (err) goto fail;
     }
-
-    log_printf(LOG_DEBUG, "Prepared %zu pollfd entries", vec_pollfd_len(pollfd));
 
 fail:
     return err;
@@ -363,12 +353,12 @@ fail:
 }
 
 static error_t *loop_handler_task_cb(task_ctx_t *ctx) {
-    log_printf(LOG_DEBUG, "Running a task");
+    error_t *err = NULL;
 
     handler_t *handler = arc_handler_get(ctx->handler);
 
     handler_lock(handler);
-    error_t *err = handler->vtable->process(handler, ctx->loop, ctx->flags);
+    err = handler->vtable->process(handler, ctx->loop, ctx->flags);
     handler_unlock(handler);
 
     if (err) {
@@ -559,6 +549,5 @@ void loop_stop(loop_t *self) {
 }
 
 void loop_interrupt(loop_t *self) {
-    log_printf(LOG_DEBUG, "Interrupting the loop");
     notify_post(self->notify);
 }

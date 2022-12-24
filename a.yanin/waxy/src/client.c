@@ -71,6 +71,16 @@ static slice_t const method_not_allowed_slice = {
     .len = sizeof(method_not_allowed),
 };
 
+static void client_on_rd_free(handler_t *rd) {
+    client_ctx_t *ctx = handler_custom_data(rd);
+
+    if (ctx == NULL) {
+        return;
+    }
+
+    ctx->rd = NULL;
+}
+
 static error_t *client_on_req_err_write(
     loop_t *,
     tcp_handler_t *handler,
@@ -106,6 +116,7 @@ static error_t *client_cache_on_write(
         handler_unregister((handler_t *) handler);
     }
 
+    log_printf(LOG_DEBUG, "Freeing the buffer in on_write: %p", (void *) buf);
     free(buf);
 
     return NULL;
@@ -123,6 +134,7 @@ static error_t *client_cache_on_write_error(
 
     // see the comment in `client_cache_on_write`
     cache_buf_t *buf = (cache_buf_t *)((char *) slices - offsetof(cache_buf_t, slice));
+    log_printf(LOG_DEBUG, "Freeing the buffer in on_error: %p", (void *) buf);
     free(buf);
 
     // the tcp handler's generic error handler will free everything
@@ -134,7 +146,7 @@ static error_t *client_cache_on_read(cache_rd_t *rd, loop_t *) {
 
     client_ctx_t *ctx = handler_custom_data((handler_t *) rd);
 
-    if (ctx == NULL) {
+    if (ctx == NULL || ctx->rd == NULL) {
         // the TCP client has been unregistered
         handler_unregister((handler_t *) rd);
 
@@ -145,6 +157,7 @@ static error_t *client_cache_on_read(cache_rd_t *rd, loop_t *) {
     err = error_wrap("Could not allocate a buffer", OK_IF(buf != NULL));
     if (err) goto malloc_fail;
 
+    log_printf(LOG_DEBUG, "Allocated %p", (void *) buf);
     buf->slice = (slice_t) {
         .base = buf->buf,
         .len = 0,
@@ -160,7 +173,6 @@ static error_t *client_cache_on_read(cache_rd_t *rd, loop_t *) {
     handler_unlock((handler_t *) rd);
     handler_lock((handler_t *) ctx->tcp);
 
-    log_printf(LOG_DEBUG, "Sent %zu to the client", count);
     err = tcp_write(ctx->tcp, 1, &buf->slice,
         client_cache_on_write, client_cache_on_write_error);
 
@@ -233,6 +245,7 @@ static error_t *client_launch_cache_rd(client_cache_ctx_t *cache_ctx, cache_rd_t
     ctx->rd = rd;
 
     handler_set_custom_data((handler_t *) rd, ctx);
+    handler_set_on_free((handler_t *) rd, client_on_rd_free);
     cache_rd_set_on_read(rd, client_cache_on_read);
     cache_rd_set_on_update(rd, client_cache_on_update);
     err = loop_register(loop, (handler_t *) rd);

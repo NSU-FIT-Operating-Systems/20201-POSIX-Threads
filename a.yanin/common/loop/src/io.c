@@ -43,13 +43,15 @@ error_t *io_process_write_req(
     void *self,
     loop_t *loop,
     error_t *err,
-    bool *processed,
+    io_process_result_t *processed,
     int fd,
     write_req_t *(*get_req)(void *self),
     error_t *(*on_write)(void *self, loop_t *loop, write_req_t *req),
     error_t *(*on_error)(void *self, loop_t *loop, write_req_t *req, error_t *err)
 ) {
     write_req_t *req = get_req(self);
+    log_printf(LOG_DEBUG, "io_process_write_req(req = %p)", (void *) req);
+    *processed = IO_PROCESS_AGAIN;
 
     if (err) {
         err = error_wrap("A previous write request has failed", err);
@@ -78,6 +80,8 @@ error_t *io_process_write_req(
     vec_iovec_t iov = vec_iovec_new();
     err = error_from_common(vec_iovec_resize(&iov, iov_size));
     if (err) goto iov_resize_fail;
+
+    log_printf(LOG_DEBUG, "iov");
 
     size_t write_requested = 0;
 
@@ -114,15 +118,20 @@ error_t *io_process_write_req(
     ));
     if (err) goto writev_fail;
 
+    log_printf(LOG_DEBUG, "writev");
     written_count = req->written_count += (size_t) count;
     assert(req->written_count <= write_requested);
 
     if (req->written_count == write_requested) {
         err = on_write(self, loop, req);
         if (err) goto cb_fail;
+
+        *processed = IO_PROCESS_FINISHED;
+    } else {
+        *processed = IO_PROCESS_PARTIAL;
     }
 
-    *processed = true;
+    log_printf(LOG_DEBUG, "processed");
 
 cb_fail:
 writev_fail:
@@ -131,11 +140,12 @@ writev_fail:
 iov_resize_fail:
 chained_error:
     if (err) {
+        log_printf(LOG_DEBUG, "err");
         err = on_error(self, loop, req, err);
     }
 
     if (err) {
-        *processed = true;
+        *processed = IO_PROCESS_FINISHED;
     }
 
     return err;

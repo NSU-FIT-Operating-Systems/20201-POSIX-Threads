@@ -82,7 +82,7 @@ static void *worker_thread(void *data) {
             assert_cond_wait(&ex->cond, &ex->mtx);
         }
 
-        if (ex->state != THREAD_POOL_RUNNING) {
+        if (ex->state != THREAD_POOL_RUNNING && dlist_task_len(&ex->tasks) == 0) {
             break;
         }
 

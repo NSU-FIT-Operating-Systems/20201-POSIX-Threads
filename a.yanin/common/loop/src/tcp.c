@@ -374,6 +374,7 @@ static error_t *tcp_client_process_write_req_on_error(
 ) {
     tcp_handler_t *self = self_opaque;
     tcp_write_req_t *tcp_req = (tcp_write_req_t *) req;
+    log_printf(LOG_DEBUG, "Had an error: buf = %p, on_error == NULL = %d", (void *) tcp_req->write_req.slices, tcp_req->on_error == NULL);
 
     if (tcp_req->on_error != NULL) {
         return tcp_req->on_error(loop, self, err,
@@ -387,10 +388,8 @@ static error_t *tcp_client_process_write_req(
     tcp_handler_t *self,
     loop_t *loop,
     error_t *err,
-    bool *processed
+    io_process_result_t *processed
 ) {
-    log_printf(LOG_DEBUG, "Processing a write request");
-
     return io_process_write_req(
         self,
         loop,
@@ -406,20 +405,38 @@ static error_t *tcp_client_process_write_req(
 static error_t *tcp_client_handle_write(tcp_handler_t *self, loop_t *loop) {
     error_t *err = NULL;
 
+    log_printf(LOG_DEBUG, "Have %zu reqs", vec_wrreq_len(&self->write_reqs));
+
     while (!self->output_shut && vec_wrreq_len(&self->write_reqs) > 0) {
-        bool processed = false;
+        io_process_result_t processed = false;
         err = tcp_client_process_write_req(self, loop, err, &processed);
+
+        switch (processed) {
+        case IO_PROCESS_FINISHED:
+            vec_wrreq_remove(&self->write_reqs, 0);
+            [[fallthrough]];
+
+        case IO_PROCESS_PARTIAL:
+            if (!err) {
+                goto out;
+            }
+
+            [[fallthrough]];
+
+        case IO_PROCESS_AGAIN:
+            continue;
+        }
 
         if (processed) {
             // XXX: this makes it O(n²)
             // a better choice would be a ring buffer
-            vec_wrreq_remove(&self->write_reqs, 0);
-
-            if (!err) {
-                break;
-            }
+            log_printf(LOG_DEBUG, "Processed %p (err = %p)", (void *) vec_wrreq_get(&self->write_reqs, 0)->write_req.slices, (void *) err);
         }
     }
+
+out:
+
+    log_printf(LOG_DEBUG, "Now it's %zu reqs", vec_wrreq_len(&self->write_reqs));
 
     if (self->output_shut) {
         err = error_combine(err, error_wrap(
@@ -639,11 +656,12 @@ error_t *tcp_write(
     tcp_on_write_cb_t on_write,
     tcp_on_write_error_cb_t on_error
 ) {
+    error_assert(error_wrap("The handler must be registered before calling tcp_write",
+        OK_IF(handler_loop((handler_t *) self) != NULL)));
+
     error_t *err = NULL;
     err = error_wrap("The output has been shut down", OK_IF(!self->output_shut));
     if (err) goto fail;
-
-    log_printf(LOG_DEBUG, "Added a write request");
 
     err = error_from_common(vec_wrreq_push(&self->write_reqs, (tcp_write_req_t) {
         .write_req = {
@@ -655,6 +673,10 @@ error_t *tcp_write(
         .on_error = on_error,
     }));
     if (err) goto fail;
+
+    log_printf(LOG_DEBUG, "Added %p to write_reqs; have %zu of them now",
+        (void *) slices,
+        vec_wrreq_len(&self->write_reqs));
 
     poll_flags_t flags = handler_pending_mask(&self->handler);
     flags |= LOOP_WRITE;
