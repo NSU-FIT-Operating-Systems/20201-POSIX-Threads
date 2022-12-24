@@ -30,7 +30,7 @@ st_dependencies = dependencies + [
 ]
 
 mt_dependencies = dependencies + [
-  # TODO
+  common_modules['executor.thread-pool'],
 ]
 
 common_sources = [
