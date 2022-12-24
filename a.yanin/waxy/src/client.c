@@ -351,7 +351,7 @@ static error_t *client_process_request(
 
     if (err) {
         log_printf(LOG_WARN, "A client %s:%u has sent an invalid URL", ip, port);
-        error_log_free(&err, LOG_WARN, ERROR_VERBOSITY_SOURCE_CHAIN);
+        error_log_free(&err, LOG_WARN, ERROR_VERBOSITY_SHORT);
 
         goto fail;
     }

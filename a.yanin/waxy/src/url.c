@@ -132,6 +132,7 @@ static bool is_windows_drive_letter(slice_t slice) {
 
 static bool is_url_ascii(int c) {
     return (
+        is_ascii_alphanum(c) ||
         c == '!' ||
         c == '$' ||
         c == '&' ||
@@ -1054,7 +1055,7 @@ error_t *url_parse(slice_t slice, url_t *result, bool *fatal) {
     err = error_combine(err, url_remove_tab_nl(&input));
 
     // the slices should point to the buffer **after** the parsing is done
-    // since the buffer keeps being reallocated, we have to store the indices during parsing
+    // since the buffer keeps being reallocated, we have to store indices during parsing
     url_region_t region_url = {
         .scheme = region_empty(),
         .username = region_empty(),

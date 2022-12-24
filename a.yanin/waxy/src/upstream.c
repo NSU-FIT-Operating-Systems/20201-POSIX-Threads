@@ -112,6 +112,14 @@ static error_t *upstream_on_read(loop_t *, tcp_handler_t *handler, slice_t slice
             last_len
         );
 
+        log_printf(LOG_DEBUG, "parsing (len = %zu, last_len = %zu, count = %d): %.*s",
+            string_len(&ctx->buf),
+            last_len,
+            count,
+            (int) string_len(&ctx->buf),
+            string_as_cptr(&ctx->buf)
+        );
+
         if (count == -2) {
             // partial data
             if (tcp_is_eof(handler)) {
@@ -124,24 +132,32 @@ static error_t *upstream_on_read(loop_t *, tcp_handler_t *handler, slice_t slice
             log_printf(LOG_ERR, "The upstream %s:%u has sent an invalid HTTP response", ip, port);
 
             goto unregister;
-        } else if (status == 200) {
-            error_t *commit_err = cache_wr_commit(ctx->wr);
+        } else {
+            if (status == 200) {
+                error_t *commit_err = cache_wr_commit(ctx->wr);
 
-            if (commit_err) {
-                error_log_free(
-                    &commit_err,
-                    LOG_ERR,
-                    ERROR_VERBOSITY_SOURCE_CHAIN | ERROR_VERBOSITY_BACKTRACE
-                );
-                log_printf(
-                    LOG_ERR,
-                    "Could not commit a response from the upstream %s:%u to the cache",
-                    ip, port
-                );
+                if (commit_err) {
+                    error_log_free(
+                        &commit_err,
+                        LOG_ERR,
+                        ERROR_VERBOSITY_SOURCE_CHAIN | ERROR_VERBOSITY_BACKTRACE
+                    );
+                    log_printf(
+                        LOG_ERR,
+                        "Could not commit a response from the upstream %s:%u to the cache",
+                        ip, port
+                    );
+                } else {
+                    log_printf(
+                        LOG_INFO,
+                        "Received a 200 status code, committing the response to the cache"
+                    );
+                }
             } else {
                 log_printf(
                     LOG_INFO,
-                    "Received a 200 status code, committing the response to the cache"
+                    "Received a %d status code: not committing to the cache",
+                    status
                 );
             }
 
