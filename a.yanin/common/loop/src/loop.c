@@ -60,7 +60,7 @@ struct loop {
     bool started;
 };
 
-error_t *loop_on_notified(loop_t *, notify_t *) {
+static error_t *loop_on_notified(loop_t *, notify_t *) {
     return NULL;
 }
 
