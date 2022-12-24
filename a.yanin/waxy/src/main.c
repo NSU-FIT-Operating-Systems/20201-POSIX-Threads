@@ -4,7 +4,7 @@
 #include "server.h"
 
 enum {
-    CACHE_SIZE = 512 * 1024 * 1024,
+    CACHE_SIZE = 1024 * 1024 * 1024,
 };
 
 static _Atomic(server_t *) server_ref = NULL;

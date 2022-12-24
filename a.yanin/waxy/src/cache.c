@@ -40,34 +40,62 @@ typedef cache_rd_t *cache_rd_ptr_t;
 #define VEC_CONFIG (COLLECTION_DECLARE | COLLECTION_DEFINE | COLLECTION_STATIC)
 #include <common/collections/vec.h>
 
-static byte_hasher_config_t const url_ptr_primary_hasher_data = {
-    .seed = 41,
-    .input_size = sizeof(url_t),
+static void url_hash(url_t const *url, byte_hasher_state_t *state) {
+    byte_hasher_digest_slice(state, url->scheme.base, url->scheme.len);
+    byte_hasher_digest_slice(state, url->username.base, url->username.len);
+    byte_hasher_digest_slice(state, url->password.base, url->password.len);
+    byte_hasher_digest_bool(state, url->host_null);
+
+    if (!url->host_null) {
+        byte_hasher_digest_slice(state, url->host.base, url->host.len);
+    }
+
+    byte_hasher_digest_bool(state, url->port_null);
+
+    if (!url->port_null) {
+        byte_hasher_digest_u16(state, url->port);
+    }
+
+    byte_hasher_digest_slice(state, url->path.base, url->path.len);
+    byte_hasher_digest_bool(state, url->query_null);
+
+    if (!url->query_null) {
+        byte_hasher_digest_slice(state, url->query.base, url->query.len);
+    }
+
+    byte_hasher_digest_bool(state, url->fragment_null);
+
+    if (!url->fragment_null) {
+        byte_hasher_digest_slice(state, url->fragment.base, url->fragment.len);
+    }
+}
+
+static byte_hasher_config_t const url_hasher_config_primary = {
+    .seed = 164,
+    .hash = (void (*)(void const *, byte_hasher_state_t *)) url_hash,
 };
 
-static byte_hasher_config_t const url_ptr_secondary_hasher_data = {
-    .seed = 76,
-    .input_size = sizeof(url_t),
+static byte_hasher_config_t const url_hasher_config_secondary = {
+    .seed = 235,
+    .hash = (void (*)(void const *, byte_hasher_state_t *)) url_hash,
 };
 
 static size_t url_ptr_hash_primary(url_t const *const *ptr, void *data) {
-    // FIXME: this is incorrect
     return byte_hasher(*ptr, data);
 }
 
 static size_t url_ptr_hash_secondary(url_t const *const *ptr, void *data) {
-    // FIXME: this is incorrect
     return byte_hasher_secondary(*ptr, data);
 }
 
 static hash_entry_hasher_data_t const url_ptr_primary_hasher = {
     .hasher = url_ptr_hash_primary,
-    .opaque_data = (void *) &url_ptr_primary_hasher_data,
+    .opaque_data = (void *) &url_hasher_config_primary,
 };
 
 static hash_entry_hasher_data_t const url_ptr_secondary_hasher = {
     .hasher = url_ptr_hash_secondary,
-    .opaque_data = (void *) &url_ptr_secondary_hasher_data,
+    .opaque_data = (void *) &url_hasher_config_secondary,
 };
 
 static bool url_ptr_eq(url_t const *const *lhs, url_t const *const *rhs) {
@@ -483,7 +511,6 @@ static void cache_entry_free(cache_entry_t *self) {
 }
 
 static void cache_entry_wake_unsync(cache_entry_t *entry) {
-    log_printf(LOG_DEBUG, "cache_entry_wake_unsync: %zu handles", vec_rd_len(&entry->handles));
     for (size_t i = 0; i < vec_rd_len(&entry->handles); ++i) {
         cache_rd_t *handle = *vec_rd_get_mut(&entry->handles, i);
         log_printf(LOG_DEBUG, "Waking up %p", (void *) handle);

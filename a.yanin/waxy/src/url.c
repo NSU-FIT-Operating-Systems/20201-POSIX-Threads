@@ -889,6 +889,16 @@ static error_t *url_parser_path(url_parser_t *self) {
             *string_get_mut(self->buf, string_len(self->buf) - 1) = ':';
         }
 
+        if (c == '/' || (self->special && c == '\\')) {
+            error_t *push_err = error_from_common(string_push(self->buf, c));
+
+            if (push_err) {
+                err = error_combine(push_err, err);
+                self->state = STATE_FAIL;
+                goto fail;
+            }
+        }
+
         slice_t buf = url_parser_slice(self);
 
         if (self->result->path.len == 0) {
@@ -1076,7 +1086,7 @@ error_t *url_parse(slice_t slice, url_t *result, bool *fatal) {
         .input = &input,
         .buf = &buf,
         .slice_start = 0,
-        .pos = 0,
+        .pos = -1,
         .state = STATE_SCHEME_START,
         .at_sign_seen = false,
         .inside_brackets = false,
@@ -1085,6 +1095,8 @@ error_t *url_parse(slice_t slice, url_t *result, bool *fatal) {
     };
 
     do {
+        ++parser.pos;
+
         switch (parser.state) {
         case STATE_SCHEME_START:
             err = error_combine(err, url_parser_scheme_start(&parser));
@@ -1157,8 +1169,6 @@ error_t *url_parse(slice_t slice, url_t *result, bool *fatal) {
         case STATE_FAIL:
             goto parser_fail;
         }
-
-        ++parser.pos;
     } while (!is_eof(&parser));
 
     *result = (url_t) {
