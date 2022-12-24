@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -13,11 +14,14 @@ enum {
 static _Atomic(server_t *) server_ref = NULL;
 
 static void on_sigint(int) {
+    int saved_errno = errno;
     server_t *server = atomic_exchange(&server_ref, NULL);
 
     if (server != NULL) {
         server_stop(server);
     }
+
+    errno = saved_errno;
 }
 
 static void print_usage(void) {
