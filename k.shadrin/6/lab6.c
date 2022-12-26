@@ -3,12 +3,13 @@
 #include <unistd.h>
 #include <string.h>
 #include <stdatomic.h>
+#include <stdlib.h>
 
 int all_inited = 0;
 pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 atomic_int count = 0;
-atomic_int finished = 0;
+
 void *thread_start_routine(void *params) {
     ++count;
     int err;
@@ -31,9 +32,8 @@ void *thread_start_routine(void *params) {
         pthread_exit(0);
     }
     char *string = (char*)params;
-    usleep(strlen(string) * 25000);
+    usleep(strlen(string) * 12500);
     printf("%s\n", string);
-    ++finished;
     pthread_exit(0);
 }
 
@@ -64,6 +64,7 @@ int main(int argc, char *argv[]) {
         printf("pthread_mutex_lock error!");
         pthread_exit(0);
     }
+    
     all_inited = 1;
     err = pthread_cond_broadcast(&cond);
     if(err != 0){
@@ -77,11 +78,16 @@ int main(int argc, char *argv[]) {
         pthread_exit(0);
     }
 
-    while (finished != thread_num)
-    {
-        sleep(1);
+    for(int i = 0; i < thread_num; ++i){
+        err = pthread_join(threads[i], NULL);
+        if(err != 0){
+            printf("Join error!");
+            pthread_mutex_destroy(&mutex);
+            pthread_cond_destroy(&cond);
+            pthread_exit(0);
+        }
     }
-    
+
     err = pthread_cond_destroy(&cond);
     if(err != 0){
         printf("pthread_cond_destroy error!");
