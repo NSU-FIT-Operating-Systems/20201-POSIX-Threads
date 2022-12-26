@@ -7,8 +7,10 @@
 
 #include <pthread.h>
 
+#ifdef BACKTRACE_ENABLED
 #include <backtrace.h>
 #include <backtrace-supported.h>
+#endif
 
 struct backtrace {
     backtrace_t *parent;
@@ -18,7 +20,7 @@ struct backtrace {
     char *func;
 };
 
-#ifdef BACKTRACE_SUPPORTED
+#if defined(BACKTRACE_SUPPORTED) && defined(BACKTRACE_ENABLED)
 static pthread_once_t backtrace_state_init = PTHREAD_ONCE_INIT;
 
 static struct backtrace_state *backtrace_state = NULL;

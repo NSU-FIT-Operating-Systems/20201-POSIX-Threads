@@ -1,5 +1,13 @@
+error_libbacktrace_dep = dependency('libbacktrace', required: get_option('libbacktrace'))
+
+error_c_args = []
+
+if error_libbacktrace_dep.found()
+  error_c_args += ['-DBACKTRACE_ENABLED']
+endif
+
 error_deps = [
-  dependency('libbacktrace'),
+  error_libbacktrace_dep,
   dependency('threads'),
   modules['collections.string'],
   modules['log'],
@@ -13,6 +21,7 @@ modules += {
         'src/error.c',
         'src/format.c',
       ],
+      c_args: error_c_args,
       dependencies: error_deps,
       include_directories: 'include'),
     dependencies: error_deps,
