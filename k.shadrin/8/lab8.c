@@ -1,14 +1,20 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
+#include <unistd.h>
 #include <string.h>
 #include <errno.h>
 
 #define STEPS 200000000
 
+long thread_count = 0;
+int all_inited = 0;
+long inited_count = 0;
+pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+
 typedef struct Thread_params{
-    long thread_count; // Количество thread-ов
-    long long id; // Идентификатор потока(нужен для оффсета)
+    long id; // Идентификатор потока(нужен для оффсета)
     double psum; // Частичная сумма потока
 } thread_params;
 
@@ -18,6 +24,26 @@ void *calculate(void *param) {
         printf("Invalid parameters at the calculate function!\n");
         return NULL;
     }
+    inited_count++;
+    int err;
+    err = pthread_mutex_lock(&mutex);
+    if(err != 0){
+        printf("pthread_mutex_lock error!");
+        pthread_exit(0);
+    }
+    while (!all_inited)
+    {
+        err = pthread_cond_wait(&cond, &mutex);
+        if(err != 0){
+            printf("pthread_cond_wait error!");
+            pthread_exit(0);
+        }
+    }
+    err = pthread_mutex_unlock(&mutex);
+    if(err != 0){
+        printf("pthread_mutex_unlock error!");
+        pthread_exit(0);
+    }
     thread_params *params =(thread_params*)param;
     if(params == NULL){
         printf("Invalid parameters at the calculate function!\n");
@@ -25,7 +51,6 @@ void *calculate(void *param) {
     }
     double partial_sum = 0.0;
     long long id = params->id;
-    long thread_count = params->thread_count;
     for(long long i = id; i < STEPS; i += thread_count) { // по смещению работаем
         partial_sum += 1.0 / (i * 4.0 + 1.0);
         partial_sum -= 1.0 / (i * 4.0 + 3.0);
@@ -36,15 +61,13 @@ void *calculate(void *param) {
 }
 
 // Утилита для быстрого создания потоков и инициализации их параметров
-long create_threads(pthread_t *threads, thread_params *params, long thread_count){
-    if(thread_count < 1 || params == NULL || threads == NULL){
+void create_threads(pthread_t *threads, thread_params *params, long requested_num){
+    if(params == NULL || threads == NULL){
         printf("Invalid parameters at the create_thread function!\n");
-        return 0;
+        return;
     }
     int err;
-    long init_count = 0;
-    for(long i = 0; i < thread_count; ++i){
-        params[i].thread_count = thread_count;
+    for(long i = 0; i < requested_num; i++){
         params[i].id = i;
         // Даём каждому потоку задачу вычислить частичную сумму и параметры впридачу
         err = pthread_create(&threads[i], NULL, calculate, &params[i]);
@@ -52,14 +75,13 @@ long create_threads(pthread_t *threads, thread_params *params, long thread_count
             printf("Couldn't create thread!\n");
             break;
         }
-        init_count++;
+        thread_count++;
     }
-    return init_count;
 }
 
 // Утилита для применения pthread_join() для всех созданных и работающих потоков плюс получение вычисленного ими значения числа пи
-int threads_join(pthread_t *threads, long thread_count, double *pi){
-    if(thread_count < 1 || pi == NULL || threads == NULL){
+int threads_join(pthread_t *threads, double *pi){
+    if(pi == NULL || threads == NULL){
         printf("Invalid parameters at the threads_join function!\n");
         return 0;
     }
@@ -93,37 +115,73 @@ int main(int argc, char ** argv) {
         return 0;
     }
 
-    long thread_count;
+    long requested_num;
     char *tc_string = argv[1];
     errno = 0;
+    int err;
     char *end = "";
-    thread_count = strtol(tc_string, &end, 10); // конвертируем argv значение в чиселку
+    requested_num = strtol(tc_string, &end, 10); // конвертируем argv значение в чиселку
     if(errno != 0){
         perror("Can't convert given number!\n");
-        return EXIT_FAILURE;
+        pthread_exit(0);
     }
-    if(thread_count < 1){
+    if(requested_num < 1){
         printf("You can't create 0 or less threads!\n");
-        return EXIT_FAILURE;
+        pthread_exit(0);
     }
 
-    pthread_t threads[thread_count];
-    thread_params params[thread_count];
+    pthread_t threads[requested_num];
+    thread_params params[requested_num];
 
     // Создание и инициализация потоков с параметрами
-    long init_num = create_threads(threads, params, thread_count);
-    if(init_num != thread_count){
-        printf("Somehow we couldn't create as many threads as you wished!\n");
-        return EXIT_FAILURE;
+    create_threads(threads, params, requested_num);
+    while(inited_count != thread_count){
+        sleep(1);
+    }
+
+    err = pthread_mutex_lock(&mutex);
+    if(err != 0){
+        printf("pthread_mutex_lock error!");
+        pthread_exit(0);
+    }
+
+    all_inited = 1;
+    err = pthread_cond_broadcast(&cond);
+    if(err != 0){
+        printf("pthread_cond_broadcast error!");
+        pthread_exit(0);
+    }
+
+    err = pthread_mutex_unlock(&mutex);
+    if(err != 0){
+        printf("pthread_mutex_unlock error!");
+        pthread_exit(0);
+    }
+
+    if(thread_count < requested_num){
+        printf("Somehow we couldn't create as many threads as you wished!\nSo now we are working with %ld threads!\n", thread_count);
     }
 
     // Основное действо
     double result = 0.0;
-    if(0 != threads_join(threads, init_num, &result)){
+    if(0 != threads_join(threads, &result)){
         printf("Couldn't calculate PI!\n");
-        return EXIT_FAILURE;
+        pthread_exit(0);
     }
 
     printf("Result: pi = %.16f\n", result);
-    return EXIT_SUCCESS;
+
+    err = pthread_cond_destroy(&cond);
+    if(err != 0){
+        printf("pthread_cond_destroy error!");
+        pthread_exit(0);
+    }
+
+    err = pthread_mutex_destroy(&mutex);
+    if(err != 0){
+        printf("pthread_mutex_destroy error!");
+        pthread_exit(0);
+    }
+
+    pthread_exit(0);
 }
