@@ -4,6 +4,7 @@
 #include <pthread.h>
 #include <string.h>
 #include <errno.h>
+#include <time.h>
 
 #define MAX_LINES 100
 
@@ -57,6 +58,9 @@ int main(){
 			pthread_exit(0);
 		}
 		threadIDs[i] = id;
+	}
+	while(threadInitCount < numLines){
+		usleep(100);
 	}
 	pthread_cond_broadcast(&cond);
 	for(size_t i = 0; i < size; i++){
