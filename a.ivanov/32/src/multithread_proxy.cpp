@@ -2,11 +2,6 @@
 #include <csignal>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <cstring>
-#include <cassert>
-#include <sys/eventfd.h>
-
-#include "../httpparser/src/httpparser/httprequestparser.h"
 
 #include "multithread_proxy.h"
 #include "status_code.h"
@@ -14,9 +9,6 @@
 #include "utils/log.h"
 #include "resource_manager/caching_resource_manager.h"
 #include "client/client.h"
-
-
-#define TERMINATE_CMD "stop"
 
 namespace multithread_proxy {
     static const int MAX_LISTEN_QUEUE_SIZE = 500;
@@ -38,36 +30,22 @@ namespace multithread_proxy {
                 logErrorWithErrno("Error in close");
             }
         }
-        selected->addFd(proxy_socket, io::SelectData::READ);
         log("Running on " + std::to_string(port));
         while (true) {
-            ret_val = select(selected->getMaxFd() + 1, selected->getReadSet(),
-                             selected->getWriteSet(), nullptr, nullptr);
+            ret_val = acceptNewClient();
             if (ret_val < 0) {
-                if (errno != EINTR) {
-                    logErrorWithErrno("Error in select");
-                    freeResources();
-                    return;
-                }
-            }
-            assert(ret_val != 0);
-            if (FD_ISSET(proxy_socket, selected->getReadSet())) {
-                ret_val = acceptNewClient();
-                if (ret_val < 0) {
-                    logErrorWithErrno("Failed to accept new client");
-                    freeResources();
-                    return;
-                } else {
-                    log("Accepted new client");
-                }
+                logErrorWithErrno("Failed to accept new client");
+                freeResources();
+                return;
+            } else {
+                log("Accepted new client");
             }
         }
     }
 
     void HttpProxy::freeResources() {
         log("Shutdown...");
-        log("Free cache of " + std::to_string(cacheSizeBytes()) + " bytes");
-        for (const auto &tid : client_tids) {
+        for (const auto &tid: client_tids) {
             int ret_val = pthread_join(tid, nullptr);
             if (ret_val < 0) {
                 logErrorWithErrno("Failed to join client thread");
@@ -75,20 +53,14 @@ namespace multithread_proxy {
         }
         log("Joined clients");
         resource_manager->clear();
-        int ret_val = close(proxy_socket);
-        if (ret_val == status_code::FAIL) {
-            logErrorWithErrno("Error in close(proxy_socket)");
-        }
     }
 
     HttpProxy::HttpProxy(bool is_print_allowed) {
         resource_manager = new CachingResourceManager();
-        selected = new io::SelectData();
     }
 
     HttpProxy::~HttpProxy() {
         delete resource_manager;
-        delete selected;
     }
 
     // returns proxy socket fd if success, status_code::FAIL otherwise
@@ -118,10 +90,6 @@ namespace multithread_proxy {
             return status_code::FAIL;
         }
         return proxy_socket;
-    }
-
-    size_t HttpProxy::cacheSizeBytes() {
-        return 0;
     }
 
     int HttpProxy::acceptNewClient() {

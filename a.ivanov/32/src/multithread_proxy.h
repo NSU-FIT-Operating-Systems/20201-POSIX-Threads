@@ -33,11 +33,8 @@ namespace multithread_proxy {
 
         void freeResources();
 
-        size_t cacheSizeBytes();
-
         int proxy_socket = 0;
         ResourceManager *resource_manager;
-        io::SelectData *selected;
         std::vector<pthread_t> client_tids = std::vector<pthread_t>();
     };
 }
