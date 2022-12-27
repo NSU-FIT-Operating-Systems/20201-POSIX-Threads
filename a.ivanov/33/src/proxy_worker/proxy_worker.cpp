@@ -192,6 +192,8 @@ namespace worker_thread_proxy {
                 if (client.second.recv_msg_count < resource->getParts()->size()) {
                     selected->addFd(client.first, io::SelectData::WRITE);
                 }
+                log("Recv count: " + std::to_string(client.second.recv_msg_count) + ", current parts count: " +
+                std::to_string(resource->getParts()->size()));
                 for (size_t i = client.second.recv_msg_count; i < resource->getParts()->size(); i++) {
                     log("Push new part into a queue");
                     clients->at(client.first).message_queue.push_back(resource->getParts()->at(i));
@@ -238,6 +240,7 @@ namespace worker_thread_proxy {
                 auto msg = clients->at(fd).message_queue.front();
                 clients->at(fd).message_queue.erase(clients->at(fd).message_queue.begin());
                 bool written = io::WriteAll(fd, msg);
+                size_t len = msg->len;
                 if (!cache->contains(clients->at(fd).res_name)) {
                     delete msg;
                 }
@@ -249,7 +252,7 @@ namespace worker_thread_proxy {
                     return status_code::FAIL;
                 } else {
                     clients->at(fd).recv_msg_count++;
-//                    log("Sent to client " + std::to_string(len) + " bytes");
+                    log("Sent to client " + std::to_string(len) + " bytes");
                 }
             }
         }
@@ -322,6 +325,7 @@ namespace worker_thread_proxy {
     int ProxyWorker::readClientRequest(int client_fd, io::Message *request_message) {
         assert(request_message);
         assert(clients->contains(client_fd));
+        clients->at(client_fd).recv_msg_count = 0;
         httpparser::Request request;
         httpparser::HttpRequestParser parser;
         httpparser::HttpRequestParser::ParseResult res = parser.parse(request,
@@ -340,9 +344,11 @@ namespace worker_thread_proxy {
             // we've already tried to get the resource
             log("Found " + res_name + " in cache");
             Resource *resource = cache->get(res_name);
-            int res_fd = resource->getNotifyFd();
-            selected->addFd(res_fd, io::SelectData::READ);
-            (*resource_names)[res_fd] = res_name;
+            if (resource->getStatus() != COMPLETED) {
+                int res_fd = resource->subscribe();
+                selected->addFd(res_fd, io::SelectData::READ);
+                (*resource_names)[res_fd] = res_name;
+            }
             log("It's size : " + std::to_string(resource->getCurrentLength()));
             clients->at(client_fd).res_name = res_name;
             clients->at(client_fd).message_queue.clear();
@@ -377,7 +383,7 @@ namespace worker_thread_proxy {
                     logError("Resource is null");
                     return status_code::FAIL;
                 }
-                int res_fd = resource->getNotifyFd();
+                int res_fd = resource->subscribe();
                 selected->addFd(res_fd, io::SelectData::READ);
                 (*resource_names)[res_fd] = res_name;
                 if (servers->contains(sd)) {
@@ -406,7 +412,7 @@ namespace worker_thread_proxy {
     int ProxyWorker::readServerResponse(int server_fd, io::Message *new_part) {
         auto res_name = servers->at(server_fd).res_name;
         if (!cache->contains(res_name)) {
-            logError("Response with out name in cache");
+            logError("Response with the name not found in cache yet");
             cache->put(res_name, new SimpleResource);
         }
 //        log("Received " + std::to_string(new_part->len) + " bytes");
