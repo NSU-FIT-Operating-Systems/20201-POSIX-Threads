@@ -11,7 +11,7 @@
 #include "utils/select_data.h"
 #include "utils/io_operations.h"
 #include "cache/map_cache.h"
-#include "resource/resource.h"
+#include "resource/resource_info.h"
 
 #include "../httpparser/src/httpparser/httpresponseparser.h"
 #include "../httpparser/src/httpparser/response.h"
@@ -51,7 +51,7 @@ namespace worker_thread_proxy {
 
         int proxy_socket = 0;
         io::SelectData *selected;
-        aiwannafly::Cache<Resource> *cache;
+        aiwannafly::Cache<ResourceInfo> *cache;
         std::vector<Worker*> workers;
     };
 }

@@ -22,7 +22,7 @@ namespace worker_thread_proxy {
         assert(worker_threads_count >= 1);
         this->worker_threads_count = worker_threads_count;
         selected = new io::SelectData();
-        cache = new aiwannafly::MapCache<Resource>();
+        cache = new aiwannafly::MapCache<ResourceInfo>();
         workers = std::vector<Worker*>();
     }
 

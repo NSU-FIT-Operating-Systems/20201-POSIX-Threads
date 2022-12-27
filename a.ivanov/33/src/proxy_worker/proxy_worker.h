@@ -11,36 +11,19 @@
 #include "../utils/select_data.h"
 #include "../utils/io_operations.h"
 #include "../cache/map_cache.h"
-#include "../resource/resource.h"
+#include "../resource/resource_info.h"
 #include "../runnable.h"
+#include "peers.h"
 
 #include "../../httpparser/src/httpparser/httpresponseparser.h"
 #include "../../httpparser/src/httpparser/response.h"
 
 namespace worker_thread_proxy {
 
-    typedef struct ServerInfo {
-        std::vector<io::Message *> message_queue = std::vector<io::Message *>();
-        bool connected = false;
-        std::string res_name;
-
-        ServerInfo() = default;
-        ~ServerInfo() = default;
-    } ServerInfo;
-
-    typedef struct ClientInfo {
-        std::vector<io::Message *> message_queue = std::vector<io::Message *>();
-        std::string res_name;
-        size_t recv_msg_count = 0;
-
-        ClientInfo() = default;
-        ~ClientInfo() = default;
-    } ClientInfo;
-
     class ProxyWorker final : public Runnable {
     public:
 
-        ProxyWorker(int notice_fd, int signal_fd, aiwannafly::Cache<Resource> *cache);
+        ProxyWorker(int notice_fd, int signal_fd, aiwannafly::Cache<ResourceInfo> *cache);
 
         ~ProxyWorker() override;
 
@@ -52,8 +35,6 @@ namespace worker_thread_proxy {
 
         int readMessageFrom(int fd);
 
-        int readResourceNotification(int notice_fd);
-
         int readClientRequest(int client_fd, io::Message *request_message);
 
         int readServerResponse(int server_fd, io::Message *new_part);
@@ -64,7 +45,7 @@ namespace worker_thread_proxy {
 
         int finishConnectToServer(int fd);
 
-        static int notifySubscribers(Resource *resource);
+        static void notifySubscribers(const std::string &res_name, ResourceInfo *resource) ;
 
         int closeConnection(int fd);
 
@@ -75,9 +56,7 @@ namespace worker_thread_proxy {
         io::SelectData *selected;
         std::map<int, ClientInfo> *clients;
         std::map<int, ServerInfo> *servers;
-        std::map<int, std::string> *resource_names;
-
-        aiwannafly::Cache<Resource> *cache;
+        aiwannafly::Cache<ResourceInfo> *cache;
         std::map<std::string, struct hostent *> *DNS_map;
     };
 }
