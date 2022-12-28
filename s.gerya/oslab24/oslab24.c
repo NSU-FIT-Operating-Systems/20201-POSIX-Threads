@@ -2,15 +2,17 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <pthread.h>
-#include <string.h>
 #include <errno.h>
 #include <semaphore.h>
 
-#define WIDGETSUFFICE (60)
+#define WIDGETSUFFICE (20)
+#define TOPPARTLIMIT (100)
 
 #define PRODUCTIONTIMEA (1000000) /*ms*/
 #define PRODUCTIONTIMEB (2000000) /*ms*/
 #define PRODUCTIONTIMEC (3000000) /*ms*/
+
+#define WAITTIMEOUTS (10)
 
 /*used by A, B, C, module and widget respectively */
 int GDetailATotal = 0;
@@ -30,7 +32,7 @@ void produceDetailA() {
         /*spurious wakeup -> miraculous productivity*/
         sem_post(&semA); /*overflow -> still good*/
         GDetailATotal += 1;
-        if (WidgetTotal >= WIDGETSUFFICE) {
+        if ((WidgetTotal >= WIDGETSUFFICE) || (GDetailATotal == TOPPARTLIMIT)) {
             return;
         }
     }
@@ -42,7 +44,7 @@ void produceDetailB() {
         /*spurious wakeup -> miraculous productivity*/
         sem_post(&semB); /*overflow -> still good*/
         GDetailBTotal += 1;
-        if (WidgetTotal >= WIDGETSUFFICE) {
+        if ((WidgetTotal >= WIDGETSUFFICE) || (GDetailBTotal == TOPPARTLIMIT)) {
             return;
         }
     }
@@ -54,7 +56,7 @@ void produceDetailC() {
         /*spurious wakeup -> miraculous productivity*/
         sem_post(&semC); /*overflow -> still good*/
         GDetailCTotal += 1;
-        if (WidgetTotal >= WIDGETSUFFICE) {
+        if ((WidgetTotal >= WIDGETSUFFICE) || (GDetailCTotal == TOPPARTLIMIT)) {
             return;
         }
     }
@@ -65,31 +67,56 @@ void createModuleWAB() {
     ModuleTotal += 1;
 }
 
-void produceModule() {
+int produceModule() {
     int semAWaitErr = 0;
     do {
-        semAWaitErr = sem_wait(&semA);
+        struct timespec ts;
+        int res = clock_gettime(CLOCK_REALTIME, &ts);
+        if (-1 == res) {
+            perror("Error in clock_gettime\n");
+            return -1;
+        }
+        ts.tv_sec += WAITTIMEOUTS;
+        semAWaitErr = sem_timedwait(&semA, &ts);
+        if (errno == ETIMEDOUT) {
+            return -1;
+        }
         /*error -> -1 and errno*/
     } while((semAWaitErr == -1) && (errno == EINTR));
     /*presuming given semaphore is valid*/
 
     int semBWaitErr = 0;
     do {
-        semBWaitErr = sem_wait(&semB);
+        struct timespec ts;
+        int res = clock_gettime(CLOCK_REALTIME, &ts);
+        if (-1 == res) {
+            perror("Error in clock_gettime\n");
+            return -1;
+        }
+        ts.tv_sec += WAITTIMEOUTS;
+        semBWaitErr = sem_timedwait(&semB, &ts);
+        if (errno == ETIMEDOUT) {
+            return -1;
+        }
         /*error -> -1 and errno*/
     } while((semBWaitErr == -1) && (errno == EINTR));
     /*presuming given semaphore is valid*/
 
     createModuleWAB();
     sem_post(&semModuleAB); /*overflow -> still good*/
+    return 0;
 }
 
 void produceModuleCont() {
     while(1) {
-        if (WidgetTotal >= WIDGETSUFFICE) {
+        if ((WidgetTotal >= WIDGETSUFFICE) || (ModuleTotal == TOPPARTLIMIT)) {
             return;
         } else {
-            produceModule();
+            int res = produceModule();
+            if (-1 == res) {
+                fprintf(stderr, "When waiting on semaphore, timed out\n");
+                return;
+            }
         }
     }
 }
@@ -99,22 +126,43 @@ void createWidgetWCModule() {
     WidgetTotal += 1;
 }
 
-void produceWidget() {
+int produceWidget() {
     int semCWaitErr = 0;
     do {
-        semCWaitErr = sem_wait(&semC);
+        struct timespec ts;
+        int res = clock_gettime(CLOCK_REALTIME, &ts);
+        if (-1 == res) {
+            perror("Error in clock_gettime\n");
+            return -1;
+        }
+        ts.tv_sec += WAITTIMEOUTS;
+        semCWaitErr = sem_timedwait(&semC, &ts);
+        if (errno == ETIMEDOUT) {
+            return -1;
+        }
         /*error -> -1 and errno*/
     } while((semCWaitErr == -1) && (errno == EINTR));
     /*presuming given semaphore is valid*/
 
     int semModuleABWaitErr = 0;
     do {
-        semModuleABWaitErr = sem_wait(&semModuleAB);
+        struct timespec ts;
+        int res = clock_gettime(CLOCK_REALTIME, &ts);
+        if (-1 == res) {
+            perror("Error in clock_gettime\n");
+            return -1;
+        }
+        ts.tv_sec += WAITTIMEOUTS;
+        semModuleABWaitErr = sem_timedwait(&semModuleAB, &ts);
+        if (errno == ETIMEDOUT) {
+            return -1;
+        }
         /*error -> -1 and errno*/
     } while((semModuleABWaitErr == -1) && (errno == EINTR));
     /*presuming given semaphore is valid*/
 
     createWidgetWCModule();
+    return 0;
 }
 
 void produceWidgetCont() {
@@ -122,7 +170,11 @@ void produceWidgetCont() {
         if (WidgetTotal >= WIDGETSUFFICE) {
             return;
         } else {
-            produceWidget();
+            int res = produceWidget();
+            if (-1 == res) {
+                fprintf(stdout, "When waiting on semaphore, timed out\n");
+                return;
+            }
         }
     }
 }
@@ -208,7 +260,7 @@ int main() {
 
     int error = pthread_create(&threads[0], NULL, (void *(*)(void *)) produceDetailA, NULL);
     if (0 != error) {
-        fprintf(stderr, "Error when creating: [%s]\n", strerror(error));
+        perror("Error when creating thread: ");
         fprintf(stderr, "Production incomplete, failed to create prodLine A\n");
         incomp_flag = 1;
     }
@@ -221,7 +273,7 @@ int main() {
 
     error = pthread_create(&threads[1], NULL, (void *(*)(void *)) produceDetailB, NULL);
     if (0 != error) {
-        fprintf(stderr, "Error when creating: [%s]\n", strerror(error));
+        perror("Error when creating thread: ");
         fprintf(stderr, "Production incomplete, failed to create prodLine B\n");
         incomp_flag = 1;
     }
@@ -231,7 +283,7 @@ int main() {
         /*try to join prodLineA*/
         error = pthread_join(threads[0], NULL);
         if (0 != error) {
-            fprintf(stderr, "Error when joining: [%s]\n", strerror(error));
+            perror("Error when joining thread: ");
         }
         destroySemaphores();
         return -1;
@@ -239,7 +291,7 @@ int main() {
 
     error = pthread_create(&threads[2], NULL, (void *(*)(void *)) produceModuleCont, NULL);
     if (0 != error) {
-        fprintf(stderr, "Error when creating: [%s]\n", strerror(error));
+        perror("Error when creating thread: ");
         fprintf(stderr, "Production incomplete, failed to create prodLine for ABModules\n");
         incomp_flag = 1;
     }
@@ -249,12 +301,12 @@ int main() {
         /*try to join prodLineA*/
         error = pthread_join(threads[0], NULL);
         if (0 != error) {
-            fprintf(stderr, "Error when joining: [%s]\n", strerror(error));
+            perror("Error when joining thread: ");
         }
         /*try to join prodLineB*/
         error = pthread_join(threads[1], NULL);
         if (0 != error) {
-            fprintf(stderr, "Error when joining: [%s]\n", strerror(error));
+            perror("Error when joining thread: ");
         }
         destroySemaphores();
         return -1;
@@ -262,7 +314,7 @@ int main() {
 
     error = pthread_create(&threads[3], NULL, (void *(*)(void *)) produceDetailC, NULL);
     if (0 != error) {
-        fprintf(stderr, "Error when creating: [%s]\n", strerror(error));
+        perror("Error when creating thread: ");
         fprintf(stderr, "Production incomplete, failed to create prodLine C\n");
         incomp_flag = 1;
     }
@@ -272,17 +324,17 @@ int main() {
         /*try to join prodLineA*/
         error = pthread_join(threads[0], NULL);
         if (0 != error) {
-            fprintf(stderr, "Error when joining: [%s]\n", strerror(error));
+            perror("Error when joining thread: ");
         }
         /*try to join prodLineB*/
         error = pthread_join(threads[1], NULL);
         if (0 != error) {
-            fprintf(stderr, "Error when joining: [%s]\n", strerror(error));
+            perror("Error when joining thread: ");
         }
         /*try to join prodLine for ABModules*/
         error = pthread_join(threads[2], NULL);
         if (0 != error) {
-            fprintf(stderr, "Error when joining: [%s]\n", strerror(error));
+            perror("Error when joining thread: ");
         }
         destroySemaphores();
         return -1;
@@ -290,7 +342,7 @@ int main() {
 
     error = pthread_create(&threads[4], NULL, (void *(*)(void *)) produceWidgetCont, NULL);
     if (0 != error) {
-        fprintf(stderr, "Error when creating: [%s]\n", strerror(error));
+        perror("Error when creating thread: ");
         fprintf(stderr, "Production incomplete, failed to create prodLine for Widgets\n");
         incomp_flag = 1;
     }
@@ -300,22 +352,22 @@ int main() {
         /*try to join prodLineA*/
         error = pthread_join(threads[0], NULL);
         if (0 != error) {
-            fprintf(stderr, "Error when joining: [%s]\n", strerror(error));
+            perror("Error when joining thread: ");
         }
         /*try to join prodLineB*/
         error = pthread_join(threads[1], NULL);
         if (0 != error) {
-            fprintf(stderr, "Error when joining: [%s]\n", strerror(error));
+            perror("Error when joining thread: ");
         }
         /*try to join prodLine for ABModules*/
         error = pthread_join(threads[2], NULL);
         if (0 != error) {
-            fprintf(stderr, "Error when joining: [%s]\n", strerror(error));
+            perror("Error when joining thread: ");
         }
         /*try to join prodLine C*/
         error = pthread_join(threads[3], NULL);
         if (0 != error) {
-            fprintf(stderr, "Error when joining: [%s]\n", strerror(error));
+            perror("Error when joining thread: ");
         }
         destroySemaphores();
         return -1;
@@ -325,7 +377,7 @@ int main() {
     for (int i = 0; i < numThreads; i++) {
         error = pthread_join(threads[i], NULL);
         if (0 != error) {
-            fprintf(stderr, "Error when joining: [%s]\n", strerror(error));
+            perror("Error when joining thread: ");
             fprintf(stderr, "Thread [%d] failed to join\n", i);
         }
     }
