@@ -7,7 +7,11 @@
 template<class T>
 class Cache {
 public:
-    virtual ~Cache() = default;;
+    virtual ~Cache() = default;
+
+    virtual void lock() = 0;
+
+    virtual void unlock() = 0;
 
     virtual T *get(const std::string &) = 0;
 

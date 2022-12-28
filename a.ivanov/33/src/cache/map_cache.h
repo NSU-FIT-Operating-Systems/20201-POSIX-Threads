@@ -16,12 +16,25 @@ public:
         rwlock = new pthread_rwlock_t;
         int code = pthread_rwlock_init(rwlock, nullptr);
         assert(code == 0);
+        mutex = new pthread_mutex_t;
+        code = pthread_mutex_init(mutex, nullptr);
+        assert(code == 0);
     }
 
     ~MapCache() {
         delete table;
         pthread_rwlock_destroy(rwlock);
         delete rwlock;
+        pthread_mutex_destroy(mutex);
+        delete mutex;
+    }
+
+    void lock() override {
+        pthread_mutex_lock(mutex);
+    }
+
+    void unlock() override {
+        pthread_mutex_unlock(mutex);
     }
 
     T *get(const std::string &key) override {
@@ -80,6 +93,7 @@ public:
 private:
     std::map<std::string, T *> *table;
     pthread_rwlock_t *rwlock{};
+    pthread_mutex_t *mutex;
 };
 
 #endif //HTTP_CPP_PROXY_MAP_CACHE_H

@@ -23,6 +23,7 @@ namespace worker_thread_proxy {
         size_t content_length = 0;
         bool free_messages = true;
         bool has_content_length = false;
+        int server_fd = -1;
         // vector of socket descriptors of clients who wait for the resource
 
         ResourceInfo() = default;

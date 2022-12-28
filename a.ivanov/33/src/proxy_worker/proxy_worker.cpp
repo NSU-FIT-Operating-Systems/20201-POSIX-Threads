@@ -331,6 +331,7 @@ namespace worker_thread_proxy {
             delete request_message;
             return status_code::SUCCESS;
         }
+        cache->lock();
         if (cache->contains(res_name)) {
             // we've already tried to get the resource
             log("Found " + res_name + " in cache");
@@ -345,18 +346,12 @@ namespace worker_thread_proxy {
             }
             log("Found " + std::to_string(res->parts.size()) + " chunks of resource");
             delete request_message;
+            cache->unlock();
             return status_code::SUCCESS;
         }
         for (const httpparser::Request::HeaderItem &header: request.headers) {
             log(header.name + std::string(" : ") + header.value);
             if (header.name == "Host") {
-                // if we already started downloading, just ignore it
-                for (const auto &s: *servers) {
-                    if (s.second->res_name == res_name) {
-                        delete request_message;
-                        return status_code::SUCCESS;
-                    }
-                }
                 int ret_val = beginConnectToServer(header.value, HTTP_PORT);
                 if (ret_val == status_code::FAIL) {
                     logErrorWithErrno("Failed to connect to remote");
@@ -374,14 +369,9 @@ namespace worker_thread_proxy {
                 if (!cache->contains(res_name)) {
                     cache->put(res_name, new ResourceInfo());
                     log(std::string("Started connecting to " + header.value));
-                } else {
-                    // Someone already started downloading the data. Aborting
-                    selected->remove_fd(server_fd, io::SelectData::READ);
-                    selected->remove_fd(server_fd, io::SelectData::WRITE);
-                    delete server;
-                    servers->erase(server_fd);
                 }
                 cache->get(res_name)->subscribers.push_back(Subscriber(selected, client_fd));
+                cache->unlock();
                 return ret_val;
             }
         }
@@ -406,7 +396,6 @@ namespace worker_thread_proxy {
             logError("Response with out name in cache");
             cache->put(res_name, new ResourceInfo);
         }
-        //log("Received " + std::to_string(new_part->len) + " bytes");
         auto res = cache->get(res_name);
         if (res->status == HttpResponseParser::ParsingCompleted) {
             delete new_part;
