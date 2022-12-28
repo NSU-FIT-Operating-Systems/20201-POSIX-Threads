@@ -2,11 +2,11 @@
 
 #include <cassert>
 #include <cstring>
-#include <unistd.h>
 #include <csignal>
-#include <sys/socket.h>
-#include "sys/eventfd.h"
 #include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/eventfd.h>
+#include <unistd.h>
 
 #include "status_code.h"
 #include "utils/socket_operations.h"
@@ -20,13 +20,13 @@ namespace worker_thread_proxy {
     HttpProxy::HttpProxy(size_t worker_threads_count) {
         assert(worker_threads_count >= 1);
         this->worker_threads_count = worker_threads_count;
-        selected = new io::SelectData();
-        cache = new aiwannafly::MapCache<ResourceInfo>();
-        workers = std::vector<Worker *>();
-        signal_fd = eventfd(0, EFD_SEMAPHORE);
+        this->selected = new io::SelectData();
+        this->cache = new MapCache<ResourceInfo>();
+        this->workers = std::vector<Worker *>();
+        this->signal_fd = eventfd(0, EFD_SEMAPHORE);
+        assert(this->signal_fd > 0);
         global_sig_fd = signal_fd;
         global_workers_count = worker_threads_count;
-        assert(signal_fd > 0);
     }
 
     HttpProxy::~HttpProxy() {
@@ -42,12 +42,12 @@ namespace worker_thread_proxy {
         }
     }
 
-    void doNothing(int sig) {}
+    void doNothing(int) {}
 
     int initSignalHandlers() {
         struct sigaction term_action{};
-        term_action.sa_handler = sendTerminate;
         sigemptyset(&term_action.sa_mask);
+        term_action.sa_handler = sendTerminate;
         term_action.sa_flags = 0;
         sigaction(SIGINT, nullptr, &term_action);
         sigaction(SIGTERM, nullptr, &term_action);
@@ -113,8 +113,12 @@ namespace worker_thread_proxy {
                     return;
                 }
             }
+            if (FD_ISSET(signal_fd, selected->getReadSet())) {
+                log("Terminate main thread");
+                freeResources();
+                return;
+            }
             if (FD_ISSET(proxy_socket, selected->getReadSet())) {
-                log("Handle new connection");
                 ret_val = acceptNewClient();
                 if (ret_val == status_code::FAIL) {
                     logErrorWithErrno("Failed to accept new connection");
@@ -143,12 +147,11 @@ namespace worker_thread_proxy {
             current_worker_id = 0;
         }
         worker_selected->addFd(new_client_fd, io::SelectData::READ);
-        log("Sent fd " + std::to_string(new_client_fd) + " to a worker thread");
         return status_code::SUCCESS;
     }
 
     void HttpProxy::freeResources() {
-        log("Shutdown...");
+        log("Shutdown proxy main thread...");
         for (auto worker: workers) {
             int code = pthread_join(worker->tid, nullptr);
             if (code < 0) {

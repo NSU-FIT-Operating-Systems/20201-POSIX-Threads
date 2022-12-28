@@ -6,12 +6,12 @@
 #include <set>
 #include <vector>
 
+#include "cache/map_cache.h"
 #include "proxy_worker/proxy_worker.h"
 #include "proxy.h"
+#include "resource/resource_info.h"
 #include "utils/select_data.h"
 #include "utils/io_operations.h"
-#include "cache/map_cache.h"
-#include "resource/resource_info.h"
 
 #include "../httpparser/src/httpparser/httpresponseparser.h"
 #include "../httpparser/src/httpparser/response.h"
@@ -52,7 +52,7 @@ namespace worker_thread_proxy {
         int signal_fd = -1;
         int proxy_socket = 0;
         io::SelectData *selected;
-        aiwannafly::Cache<ResourceInfo> *cache;
+        Cache<ResourceInfo> *cache;
         std::vector<Worker*> workers;
     };
 }

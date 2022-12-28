@@ -23,7 +23,7 @@ namespace worker_thread_proxy {
     class ProxyWorker final : public Runnable {
     public:
 
-        ProxyWorker(int signal_fd, aiwannafly::Cache<ResourceInfo> *cache);
+        ProxyWorker(int signal_fd, Cache<ResourceInfo> *cache);
 
         ~ProxyWorker() override;
 
@@ -39,7 +39,7 @@ namespace worker_thread_proxy {
 
         int readServerResponse(int server_fd, io::Message *new_part);
 
-        void updateClientQueue(int fd, bool reset);
+        void lootNewResourceParts(int fd, bool reset);
 
         int writeMessageTo(int fd);
 
@@ -55,9 +55,9 @@ namespace worker_thread_proxy {
 
         int signal_fd = -1;
         io::SelectData *selected;
-        std::map<int, ClientInfo> *clients;
-        std::map<int, ServerInfo> *servers;
-        aiwannafly::Cache<ResourceInfo> *cache;
+        std::map<int, ClientInfo*> *clients;
+        std::map<int, ServerInfo*> *servers;
+        Cache<ResourceInfo> *cache;
         std::map<std::string, struct hostent *> *DNS_map;
     };
 }

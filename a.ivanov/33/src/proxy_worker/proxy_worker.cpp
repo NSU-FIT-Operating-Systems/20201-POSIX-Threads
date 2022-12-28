@@ -1,35 +1,33 @@
 #include "proxy_worker.h"
 
-#include <unistd.h>
-#include <csignal>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <cstring>
-#include <netdb.h>
-#include <fcntl.h>
 #include <cassert>
-#include <sys/eventfd.h>
-
-#include "../../httpparser/src/httpparser/request.h"
-#include "../../httpparser/src/httpparser/httprequestparser.h"
+#include <cstring>
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <netdb.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 #include "../status_code.h"
 #include "../utils/socket_operations.h"
 #include "../utils/log.h"
 
-#define TERMINATE_CMD "stop"
+#include "../../httpparser/src/httpparser/request.h"
+#include "../../httpparser/src/httpparser/httprequestparser.h"
 
 namespace worker_thread_proxy {
+    using namespace httpparser;
+
     static const int HTTP_PORT = 80;
 
-    ProxyWorker::ProxyWorker(int signal_fd, aiwannafly::Cache<ResourceInfo> *cache) {
+    ProxyWorker::ProxyWorker(int signal_fd, Cache<ResourceInfo> *cache) {
         assert(cache);
-        selected = new io::SelectData();
-        clients = new std::map<int, ClientInfo>();
-        servers = new std::map<int, ServerInfo>();
+        this->selected = new io::SelectData();
+        this->clients = new std::map<int, ClientInfo *>();
+        this->servers = new std::map<int, ServerInfo *>();
         this->signal_fd = signal_fd;
         this->cache = cache;
-        DNS_map = new std::map<std::string, struct hostent *>();
+        this->DNS_map = new std::map<std::string, struct hostent *>();
     }
 
     ProxyWorker::~ProxyWorker() {
@@ -40,6 +38,10 @@ namespace worker_thread_proxy {
         delete DNS_map;
     }
 
+    io::SelectData *ProxyWorker::getSelected() const {
+        return selected;
+    }
+
     int ProxyWorker::run() {
         selected->addFd(signal_fd, io::SelectData::READ);
         fd_set constant_read_set;
@@ -48,7 +50,8 @@ namespace worker_thread_proxy {
             struct timeval timeout = {
                     .tv_sec = 0,
                     .tv_usec = 200 * 1000
-            };
+            }; // timeout is required to prevent situation when new resource is
+            // available, but client did not set it's fd into WRITE mode
             memcpy(&constant_read_set, selected->getReadSet(), sizeof(*selected->getReadSet()));
             memcpy(&constant_write_set, selected->getWriteSet(), sizeof(*selected->getWriteSet()));
             int ret_val = select(selected->getMaxFd() + 1, &constant_read_set, &constant_write_set,
@@ -60,9 +63,10 @@ namespace worker_thread_proxy {
                     return status_code::FAIL;
                 }
             } else if (ret_val == status_code::TIMEOUT) {
+                // here we check resources updates
                 for (int fd = 2; fd <= selected->getMaxFd(); ++fd) {
                     if (clients->contains(fd)) {
-                        updateClientQueue(fd, true);
+                        lootNewResourceParts(fd, true);
                     }
                 }
             }
@@ -76,6 +80,8 @@ namespace worker_thread_proxy {
                         logError("Terminate");
                         freeResources();
                         return status_code::TERMINATE;
+                    } else if (ret_val == status_code::FAIL) {
+                        logError("Failed to handle a message");
                     }
                 }
                 if (FD_ISSET(fd, &constant_write_set)) {
@@ -90,8 +96,8 @@ namespace worker_thread_proxy {
     }
 
     void ProxyWorker::freeResources() {
-        log("Shutdown...");
-        for (int fd = 3; fd <= selected->getMaxFd(); fd++) {
+        log("Shutdown worker thread...");
+        for (int fd = 2; fd <= selected->getMaxFd(); fd++) {
             if (FD_ISSET(fd, selected->getReadSet()) ||
                 FD_ISSET(fd, selected->getWriteSet())) {
                 int ret_val = closeConnection(fd);
@@ -104,28 +110,28 @@ namespace worker_thread_proxy {
 
     int ProxyWorker::closeConnection(int fd) {
         assert(fd > 0);
-        servers->erase(fd);
         if (servers->contains(fd)) {
-            for (const auto &msg: servers->at(fd).message_queue) {
+            for (const auto &msg: servers->at(fd)->msg_queue) {
                 delete msg;
             }
+            delete servers->at(fd);
+            servers->erase(fd);
         }
         if (clients->contains(fd)) {
             logError("Client " + std::to_string(fd) + " disconnects");
-            auto res_name = clients->at(fd).res_name;
+            auto res_name = clients->at(fd)->res_name;
             if (cache->contains(res_name)) {
-                cache->get(res_name)->lock();
-                for (auto sub: cache->get(res_name)->subscribers) {
-                    if (sub.fd == fd) {
-                        cache->get(res_name)->subscribers.erase(sub);
+                ResourceInfo *resource = cache->get(res_name);
+                for (auto it = resource->subscribers.begin(); it != resource->subscribers.end(); it++) {
+                    if (it->fd == fd) {
+                        resource->subscribers.erase(it);
                         break;
                     }
                 }
-                log("Left subscribers count:" + std::to_string(cache->get(res_name)->subscribers.size()));
-                cache->get(res_name)->unlock();
             }
+            delete clients->at(fd);
+            clients->erase(fd);
         }
-        clients->erase(fd);
         selected->remove_fd(fd, io::SelectData::READ);
         selected->remove_fd(fd, io::SelectData::WRITE);
         return close(fd);
@@ -133,6 +139,9 @@ namespace worker_thread_proxy {
 
     int ProxyWorker::readMessageFrom(int fd) {
         assert(fd > 0);
+        if (fd == signal_fd) {
+            return status_code::TERMINATE;
+        }
         io::Message *message = io::read_all(fd);
         if (message == nullptr) {
             return status_code::FAIL;
@@ -141,19 +150,11 @@ namespace worker_thread_proxy {
             int ret_val = closeConnection(fd);
             if (ret_val == status_code::FAIL) {
                 logErrorWithErrno("Error in close connection");
-                return status_code::FAIL;
+                return status_code::SUCCESS;
             }
             delete message;
             return ret_val;
         }
-        if (fd == signal_fd) {
-            if (std::string(message->data) == TERMINATE_CMD) {
-                delete message;
-                return status_code::TERMINATE;
-            }
-        }
-        // so, we've got message. what's next?
-        // let's check out who sent it
         if (servers->contains(fd)) {
             int ret_val = readServerResponse(fd, message);
             if (ret_val == status_code::FAIL) {
@@ -162,24 +163,22 @@ namespace worker_thread_proxy {
             return ret_val;
         }
         if (!clients->contains(fd)) {
-            (*clients)[fd] = ClientInfo();
+            (*clients)[fd] = new ClientInfo();
         }
         int ret_val = readClientRequest(fd, message);
-        if (ret_val == status_code::FAIL) {
-            delete message;
-        }
         return ret_val;
     }
 
-    void ProxyWorker::updateClientQueue(int fd, bool reset) {
+    void ProxyWorker::lootNewResourceParts(int fd, bool reset) {
         if (!clients->contains(fd)) return;
-        size_t msg_count = clients->at(fd).message_queue.size();
-        if (cache->contains(clients->at(fd).res_name) && msg_count == 0) {
-            auto resource = cache->get(clients->at(fd).res_name);
-            std::copy(resource->parts.begin() + (int) clients->at(fd).recv_msg_count,
-                      resource->parts.end(), std::back_inserter(clients->at(fd).message_queue));
+        ClientInfo *client = clients->at(fd);
+        size_t msg_count = client->msg_queue.size();
+        if (cache->contains(client->res_name) && msg_count == 0) {
+            auto res = cache->get(client->res_name);
+            std::copy(res->parts.begin() + (int) client->recv_msg_count,
+                      res->parts.end(), std::back_inserter(client->msg_queue));
         }
-        msg_count = clients->at(fd).message_queue.size();
+        msg_count = client->msg_queue.size();
         if (reset && msg_count > 0) {
             selected->addFd(fd, io::SelectData::WRITE);
         }
@@ -189,23 +188,26 @@ namespace worker_thread_proxy {
         selected->remove_fd(fd, io::SelectData::WRITE);
         if (servers->contains(fd)) {
             assert(!clients->contains(fd));
-            if (!servers->at(fd).connected) {
+            ServerInfo *server = servers->at(fd);
+            if (!server->connected) {
                 int ret_val = finishConnectToServer(fd);
                 if (ret_val == status_code::FAIL) {
-                    logErrorWithErrno("Failed to make connection");
+                    logErrorWithErrno("Failed to connect to host");
                 } else {
-                    if (!servers->at(fd).message_queue.empty()) {
+                    if (!server->msg_queue.empty()) {
                         selected->addFd(fd, io::SelectData::WRITE);
                     }
                 }
             } else {
-                size_t msg_count = servers->at(fd).message_queue.size();
+                size_t msg_count = server->msg_queue.size();
                 if (msg_count >= 1) {
-                    io::Message *message = servers->at(fd).message_queue.back();
-                    servers->at(fd).message_queue.pop_back();
-                    bool written = io::WriteAll(fd, message);
-                    delete message;
-                    if (msg_count - 1 > 0) {
+                    auto *msg = server->msg_queue.front();
+                    server->msg_queue.erase(server->msg_queue.begin());
+                    bool written = io::WriteAll(fd, msg);
+                    log("Sent request to a server " + std::to_string(fd));
+                    delete msg;
+                    msg_count--;
+                    if (msg_count > 0) {
                         selected->addFd(fd, io::SelectData::WRITE);
                     }
                     if (!written) {
@@ -217,22 +219,23 @@ namespace worker_thread_proxy {
         }
         if (clients->contains(fd)) {
             assert(!servers->contains(fd));
-            updateClientQueue(fd, false);
-            size_t msg_count = clients->at(fd).message_queue.size();
+            ClientInfo *client = clients->at(fd);
+            lootNewResourceParts(fd, false);
+            size_t msg_count = client->msg_queue.size();
             if (msg_count >= 1) {
-                auto msg = clients->at(fd).message_queue.front();
-                clients->at(fd).message_queue.erase(clients->at(fd).message_queue.begin());
+                auto msg = client->msg_queue.front();
+                client->msg_queue.erase(client->msg_queue.begin());
                 bool written = io::WriteAll(fd, msg);
-                if (!cache->contains(clients->at(fd).res_name)) {
+                if (!cache->contains(client->res_name)) {
                     delete msg;
                 }
                 msg_count--;
                 if (msg_count > 0) {
                     selected->addFd(fd, io::SelectData::WRITE);
                 }
-                clients->at(fd).recv_msg_count++;
+                client->recv_msg_count++;
                 if (!written) {
-                    clients->at(fd).recv_msg_count--;
+                    client->recv_msg_count--;
                     logErrorWithErrno("Error in write all");
                     return status_code::FAIL;
                 }
@@ -272,15 +275,15 @@ namespace worker_thread_proxy {
         if (return_code < 0) {
             if (errno == EINPROGRESS) {
                 selected->addFd(sd, io::SelectData::WRITE);
-                (*servers)[sd] = ServerInfo();
-                (*servers)[sd].connected = false;
+                (*servers)[sd] = new ServerInfo();
+                (*servers)[sd]->connected = false;
                 return sd;
             }
             return status_code::FAIL;
         }
         selected->addFd(sd, io::SelectData::READ);
-        (*servers)[sd] = ServerInfo();
-        (*servers)[sd].connected = true;
+        (*servers)[sd] = new ServerInfo();
+        (*servers)[sd]->connected = true;
         return sd;
     }
 
@@ -300,72 +303,90 @@ namespace worker_thread_proxy {
             return status_code::FAIL;
         }
         selected->addFd(fd, io::SelectData::READ);
-        servers->at(fd).connected = true;
+        servers->at(fd)->connected = true;
         return status_code::SUCCESS;
     }
 
     int ProxyWorker::readClientRequest(int client_fd, io::Message *request_message) {
         assert(request_message);
         assert(clients->contains(client_fd));
-        clients->at(client_fd).recv_msg_count = 0;
-        httpparser::Request request;
-        httpparser::HttpRequestParser parser;
-        httpparser::HttpRequestParser::ParseResult res = parser.parse(request,
-                                                                      request_message->data,
-                                                                      request_message->data + request_message->len);
-        if (res != httpparser::HttpRequestParser::ParsingCompleted) {
+        ClientInfo *client = clients->at(client_fd);
+        client->msg_queue.clear();
+        client->recv_msg_count = 0;
+        Request request;
+        HttpRequestParser parser;
+        HttpRequestParser::ParseResult parse_res = parser.parse(request,
+                                                          request_message->data,
+                                                          request_message->data + request_message->len);
+        if (parse_res != HttpRequestParser::ParsingCompleted) {
+            delete request_message;
             return status_code::FAIL;
         }
         log(request.method + " for " + std::to_string(client_fd));
         log(request.uri);
         std::string res_name = request.uri;
+        client->res_name = res_name;
         if (request.method != "GET") {
-            return status_code::FAIL;
+            // working with only GET
+            delete request_message;
+            return status_code::SUCCESS;
         }
         if (cache->contains(res_name)) {
             // we've already tried to get the resource
             log("Found " + res_name + " in cache");
-            ResourceInfo *resource = cache->get(res_name);
-            if (resource->status != httpparser::HttpResponseParser::ParsingCompleted) {
-                cache->get(res_name)->lock();
-                resource->subscribers.insert(Subscriber(selected, client_fd, &clients->at(client_fd)));
-                cache->get(res_name)->unlock();
+            ResourceInfo *res = cache->get(res_name);
+            if (res->status != HttpResponseParser::ParsingCompleted) {
+                // subscribe if resource is still active
+                res->subscribers.push_back(Subscriber(selected, client_fd));
             }
-            log("It's size : " + std::to_string(resource->cur_length));
-            clients->at(client_fd).res_name = res_name;
-            clients->at(client_fd).message_queue.clear();
-            if (!resource->parts.empty()) {
+            log("It's size : " + std::to_string(res->cur_length));
+            if (!res->parts.empty()) {
                 selected->addFd(client_fd, io::SelectData::WRITE);
             }
-            log("Found " + std::to_string(resource->parts.size()) + " chunks of resource");
-            return status_code::FAIL;
+            log("Found " + std::to_string(res->parts.size()) + " chunks of resource");
+            delete request_message;
+            return status_code::SUCCESS;
         }
         for (const httpparser::Request::HeaderItem &header: request.headers) {
             log(header.name + std::string(" : ") + header.value);
             if (header.name == "Host") {
+                // if we already started downloading, just ignore it
+                for (const auto &s: *servers) {
+                    if (s.second->res_name == res_name) {
+                        delete request_message;
+                        return status_code::SUCCESS;
+                    }
+                }
                 int ret_val = beginConnectToServer(header.value, HTTP_PORT);
                 if (ret_val == status_code::FAIL) {
                     logErrorWithErrno("Failed to connect to remote");
+                    delete request_message;
                     return status_code::FAIL;
                 }
-                int sd = ret_val;
-                assert(servers->contains(sd));
+                int server_fd = ret_val;
+                assert(servers->contains(server_fd));
+                ServerInfo *server = servers->at(server_fd);
+                server->res_name = res_name;
+                server->msg_queue.push_back(request_message);
+                if (servers->contains(server_fd)) {
+                    log("Server res name : " + server->res_name);
+                }
                 if (!cache->contains(res_name)) {
                     cache->put(res_name, new ResourceInfo());
+                    log(std::string("Started connecting to " + header.value));
+                } else {
+                    // Someone already started downloading the data. Aborting
+                    selected->remove_fd(server_fd, io::SelectData::READ);
+                    selected->remove_fd(server_fd, io::SelectData::WRITE);
+                    delete server;
+                    servers->erase(server_fd);
                 }
-                cache->get(res_name)->lock();
-                cache->get(res_name)->subscribers.insert(Subscriber(selected, client_fd, &clients->at(client_fd)));
-                cache->get(res_name)->unlock();
-                servers->at(sd).message_queue.push_back(request_message);
-                if (servers->contains(sd)) {
-                    log("Server res name : " + servers->at(sd).res_name);
-                }
-                servers->at(sd).res_name = res_name;
-                log(std::string("Started connecting to " + header.value));
+                cache->get(res_name)->subscribers.push_back(Subscriber(selected, client_fd));
                 return ret_val;
             }
         }
         logError("Not found host header");
+        delete request_message;
         return status_code::FAIL;
     }
 
@@ -374,29 +395,26 @@ namespace worker_thread_proxy {
         if (resource->parts.size() == 1) {
             log("Count of subscribers : " + std::to_string(resource->subscribers.size()));
         }
-        resource->lock();
         for (auto subscriber: resource->subscribers) {
-            subscriber.client->res_name = res_name;
             subscriber.selected->addFd(subscriber.fd, io::SelectData::WRITE);
         }
-        resource->unlock();
     }
 
     int ProxyWorker::readServerResponse(int server_fd, io::Message *new_part) {
-        auto res_name = servers->at(server_fd).res_name;
+        auto res_name = servers->at(server_fd)->res_name;
         if (!cache->contains(res_name)) {
             logError("Response with out name in cache");
             cache->put(res_name, new ResourceInfo);
         }
-//        log("Received " + std::to_string(new_part->len) + " bytes");
+        //log("Received " + std::to_string(new_part->len) + " bytes");
         auto res = cache->get(res_name);
-        if (res->status == httpparser::HttpResponseParser::ParsingCompleted) {
+        if (res->status == HttpResponseParser::ParsingCompleted) {
             delete new_part;
             return status_code::SUCCESS;
         }
         res->parts.push_back(new_part);
         io::Message *full_msg = new_part;
-        if (res->content_length == 0) {
+        if (!res->has_content_length) {
             if (res->full_data != nullptr) {
                 full_msg = res->full_data;
                 bool added = io::AppendMsg(res->full_data, new_part);
@@ -408,24 +426,22 @@ namespace worker_thread_proxy {
             }
         }
         res->cur_length += new_part->len;
-        if (res->content_length > res->cur_length) {
+        assert(!(res->has_content_length && res->cur_length > res->content_length));
+        if (res->has_content_length && res->content_length > res->cur_length) {
             notifySubscribers(res_name, res);
             return status_code::SUCCESS;
-        } else if (res->content_length == res->cur_length && res->content_length > 0) {
+        } else if (res->has_content_length && res->content_length == res->cur_length) {
             notifySubscribers(res_name, res);
-            res->status = httpparser::HttpResponseParser::ParsingCompleted;
+            res->status = HttpResponseParser::ParsingCompleted;
             delete res->full_data;
             res->full_data = nullptr;
             return status_code::SUCCESS;
         }
-        httpparser::Response response;
-        httpparser::HttpResponseParser parser;
-        httpparser::HttpResponseParser::ParseResult parse_res = parser.parse(response, full_msg->data,
-                                                                       full_msg->data + full_msg->len);
-        if (parse_res == httpparser::HttpResponseParser::ParsingError) {
-            log("Current resource len: " + std::to_string(res->cur_length));
-            log("Content length: " + std::to_string(res->content_length));
-            log(res->status == httpparser::HttpResponseParser::ParsingCompleted ? "Completed" : "Not completed");
+        Response response;
+        HttpResponseParser parser;
+        HttpResponseParser::ParseResult parse_res = parser.parse(response, full_msg->data,
+                                                                 full_msg->data + full_msg->len);
+        if (parse_res == HttpResponseParser::ParsingError) {
             logError("Failed to parse response of " + res_name);
             return status_code::FAIL;
         }
@@ -440,27 +456,20 @@ namespace worker_thread_proxy {
                 res->content_length = content_length;
                 assert(full_msg->len > response.content.size());
                 size_t sub = full_msg->len - response.content.size();
-                if (sub > 0) {
-                    res->content_length += sub;
-                }
-                log("Sub : " + std::to_string(sub));
-                log("Content-Length : " + std::to_string(res->content_length));
+                assert(sub >= 0);
+                res->content_length += sub;
+                res->has_content_length = true;
             }
-            log("Response of " + res_name + " is not complete, it's current length: " +
-                std::to_string(full_msg->len));
-            assert(res->status == httpparser::HttpResponseParser::ParsingIncompleted);
+            assert(res->status == HttpResponseParser::ParsingIncompleted);
             return status_code::SUCCESS;
         }
+        // ParsingSuccess
         log("Parsed response of " + res_name + std::string(" code: ") + std::to_string(response.statusCode));
-        res->status = httpparser::HttpResponseParser::ParsingCompleted;
+        res->status = HttpResponseParser::ParsingCompleted;
         log("Full bytes length : " + std::to_string(res->full_data->len));
         log("Full parts count : " + std::to_string(res->parts.size()));
         delete res->full_data;
         res->full_data = nullptr;
         return status_code::SUCCESS;
-    }
-
-    io::SelectData *ProxyWorker::getSelected() const {
-        return selected;
     }
 }

@@ -8,7 +8,7 @@
 namespace worker_thread_proxy {
 
     typedef struct ServerInfo {
-        std::vector<io::Message *> message_queue = std::vector<io::Message *>();
+        std::vector<io::Message *> msg_queue = std::vector<io::Message *>();
         bool connected = false;
         std::string res_name;
 
@@ -18,7 +18,7 @@ namespace worker_thread_proxy {
     } ServerInfo;
 
     typedef struct ClientInfo {
-        std::vector<io::Message *> message_queue = std::vector<io::Message *>();
+        std::vector<io::Message *> msg_queue = std::vector<io::Message *>();
         std::string res_name;
         size_t recv_msg_count = 0;
 
