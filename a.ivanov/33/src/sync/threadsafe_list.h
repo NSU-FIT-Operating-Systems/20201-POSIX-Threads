@@ -9,37 +9,89 @@
 #include "list.h"
 
 template <class T>
-class ThreadsafeList : public List<T>{
+class ThreadsafeList {
 public:
-    explicit ThreadsafeList(pthread_rwlock_t *rwlock) {
-        list = std::vector<T*>();
-        this->rwlock = rwlock;
+    explicit ThreadsafeList() {
+        vec = std::vector<T*>();
+        rwlock = new pthread_rwlock_t;
+        int code = pthread_rwlock_init(rwlock, nullptr);
+        assert(code == 0);
     }
 
-    ~ThreadsafeList() override = default;
+    ~ThreadsafeList() {
+        pthread_rwlock_destroy(rwlock);
+        delete rwlock;
+    };
 
-    T *at(size_t pos) const override {
-        pthread_rwlock_rdlock(rwlock);
-        auto res = list.at(pos);
-        pthread_rwlock_unlock(rwlock);
-        return res;
-    }
-
-    size_t size() const override {
-        pthread_rwlock_rdlock(rwlock);
-        auto res = list.size();
-        pthread_rwlock_unlock(rwlock);
-        return res;
-    }
-
-    void add(T *new_elem) override {
+    void push_back(T* in) {
         pthread_rwlock_wrlock(rwlock);
-        list.push_back(new_elem);
+        vec.push_back(in);
         pthread_rwlock_unlock(rwlock);
+    }
+
+    T* operator[](const int index) {
+        pthread_rwlock_rdlock(rwlock);
+        auto res = vec[index];
+        pthread_rwlock_unlock(rwlock);
+        return res;
+    }
+
+    T* at(const int index) {
+        pthread_rwlock_rdlock(rwlock);
+        auto res = vec[index];
+        pthread_rwlock_unlock(rwlock);
+        return res;
+    }
+
+    T* front() {
+        pthread_rwlock_rdlock(rwlock);
+        auto res = vec.front();
+        pthread_rwlock_unlock(rwlock);
+        return res;
+    }
+
+    size_t size() {
+        pthread_rwlock_rdlock(rwlock);
+        auto res = vec.size();
+        pthread_rwlock_unlock(rwlock);
+        return res;
+    }
+
+    bool empty() {
+        pthread_rwlock_rdlock(rwlock);
+        auto res = vec.empty();
+        pthread_rwlock_unlock(rwlock);
+        return res;
+    }
+
+    void erase(typename std::vector<T*>::iterator index) {
+        pthread_rwlock_wrlock(rwlock);
+        vec.erase(index);
+        pthread_rwlock_unlock(rwlock);
+    }
+
+    void clear() {
+        pthread_rwlock_wrlock(rwlock);
+        vec.clear();
+        pthread_rwlock_unlock(rwlock);
+    }
+
+    typename std::vector<T*>::iterator begin(){
+        pthread_rwlock_rdlock(rwlock);
+        auto res = vec.begin();
+        pthread_rwlock_unlock(rwlock);
+        return res;
+    }
+
+    typename std::vector<T*>::iterator end() {
+        pthread_rwlock_rdlock(rwlock);
+        auto res = vec.end();
+        pthread_rwlock_unlock(rwlock);
+        return res;
     }
 
 private:
-    std::vector<T*> list;
+    std::vector<T*> vec;
     pthread_rwlock_t *rwlock{};
 };
 

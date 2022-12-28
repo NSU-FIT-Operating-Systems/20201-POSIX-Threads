@@ -12,18 +12,21 @@
 #include "utils/socket_operations.h"
 #include "utils/log.h"
 
-#define TERMINATE_CMD "stop"
-
 namespace worker_thread_proxy {
     static const int MAX_LISTEN_QUEUE_SIZE = 500;
-    int signal_pipe[2];
+    int global_sig_fd = -1;
+    size_t global_workers_count = 1;
 
     HttpProxy::HttpProxy(size_t worker_threads_count) {
         assert(worker_threads_count >= 1);
         this->worker_threads_count = worker_threads_count;
         selected = new io::SelectData();
         cache = new aiwannafly::MapCache<ResourceInfo>();
-        workers = std::vector<Worker*>();
+        workers = std::vector<Worker *>();
+        signal_fd = eventfd(0, EFD_SEMAPHORE);
+        global_sig_fd = signal_fd;
+        global_workers_count = worker_threads_count;
+        assert(signal_fd > 0);
     }
 
     HttpProxy::~HttpProxy() {
@@ -32,32 +35,27 @@ namespace worker_thread_proxy {
     }
 
     void sendTerminate(__attribute__((unused)) int sig) {
-        auto *terminate = new io::Message();
-        char *cmd = (char *) malloc(strlen(TERMINATE_CMD) + 1);
-        if (cmd == nullptr) {
-            return;
+        log("Send terminate");
+        int code = eventfd_write(global_sig_fd, global_workers_count + 1);
+        if (code < 0) {
+            logErrorWithErrno("Error in eventfd_write()");
         }
-        strcpy(cmd, TERMINATE_CMD);
-        terminate->data = cmd;
-        terminate->len = strlen(TERMINATE_CMD);
-        io::WriteAll(signal_pipe[io::WRITE_PIPE_END], terminate);
-        delete terminate;
     }
 
     void doNothing(int sig) {}
 
     int initSignalHandlers() {
-        int return_value = pipe(signal_pipe);
-        if (return_value == status_code::FAIL) {
-            return status_code::FAIL;
-        }
-//        signal(SIGINT, sendTerminate);
-//        signal(SIGTERM, sendTerminate);
+        struct sigaction term_action{};
+        term_action.sa_handler = sendTerminate;
+        sigemptyset(&term_action.sa_mask);
+        term_action.sa_flags = 0;
+        sigaction(SIGINT, nullptr, &term_action);
+        sigaction(SIGTERM, nullptr, &term_action);
         signal(SIGPIPE, doNothing);
         return status_code::SUCCESS;
     }
 
-    void *launchWorker(void * arg) {
+    void *launchWorker(void *arg) {
         auto worker = (ProxyWorker *) arg;
         long code = worker->run();
         return (void *) code;
@@ -68,7 +66,7 @@ namespace worker_thread_proxy {
         for (size_t i = 0; i < worker_threads_count; i++) {
             auto worker = new Worker();
             int notice_fd = eventfd(0, 0);
-            worker->runner = new ProxyWorker(notice_fd, signal_pipe[io::READ_PIPE_END], cache);
+            worker->runner = new ProxyWorker(notice_fd, signal_fd, cache);
             int code = pthread_create(&worker->tid, nullptr, launchWorker, worker->runner);
             if (code < 0) {
                 return status_code::FAIL;
@@ -85,10 +83,6 @@ namespace worker_thread_proxy {
             return;
         }
         ret_val = initSignalHandlers();
-        if (ret_val == status_code::FAIL) {
-            logErrorWithErrno("Could not init signal handlers");
-            return;
-        }
         ret_val = launchWorkerThreads();
         if (ret_val == status_code::FAIL) {
             logErrorWithErrno("Could launch worker threads");
@@ -103,7 +97,7 @@ namespace worker_thread_proxy {
             }
         }
         selected->addFd(proxy_socket, io::SelectData::READ);
-        selected->addFd(signal_pipe[io::READ_PIPE_END], io::SelectData::READ);
+        selected->addFd(signal_fd, io::SelectData::READ);
         log("Running on " + std::to_string(port));
         while (true) {
             ret_val = select(selected->getMaxFd() + 1, selected->getReadSet(), nullptr,
@@ -152,6 +146,7 @@ namespace worker_thread_proxy {
         assert(notice_fd > 0);
         int code = eventfd_write(notice_fd, new_client_fd);
         if (code < 0) {
+            logError("FD : " + std::to_string(notice_fd));
             return status_code::FAIL;
         }
         log("Sent fd " + std::to_string(new_client_fd) + " to a worker thread");

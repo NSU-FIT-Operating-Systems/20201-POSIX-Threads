@@ -3,6 +3,7 @@
 
 #include <vector>
 #include "../utils/io_operations.h"
+#include "../sync/threadsafe_list.h"
 
 namespace worker_thread_proxy {
 

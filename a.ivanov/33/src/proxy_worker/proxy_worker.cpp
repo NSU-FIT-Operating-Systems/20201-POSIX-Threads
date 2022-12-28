@@ -66,6 +66,7 @@ namespace worker_thread_proxy {
             for (int fd = 0; fd <= selected->getMaxFd() && desc_ready > 0; ++fd) {
                 if (FD_ISSET(fd, &constant_read_set)) {
                     desc_ready -= 1;
+                    //log("Got message");
                     ret_val = readMessageFrom(fd);
                     if (ret_val == status_code::TERMINATE) {
                         logError("Terminate");
@@ -213,6 +214,7 @@ namespace worker_thread_proxy {
                           resource->parts.end(), std::back_inserter(clients->at(fd).message_queue));
             }
             msg_count = clients->at(fd).message_queue.size();
+
             if (msg_count >= 1) {
                 auto msg = clients->at(fd).message_queue.front();
                 clients->at(fd).message_queue.erase(clients->at(fd).message_queue.begin());
@@ -329,7 +331,7 @@ namespace worker_thread_proxy {
             if (!resource->parts.empty()) {
                 selected->addFd(client_fd, io::SelectData::WRITE);
             }
-            log("Got " + std::to_string(clients->at(client_fd).message_queue.size()) + " chunks of resource");
+            log("Found " + std::to_string(resource->parts.size()) + " chunks of resource");
             return status_code::FAIL;
         }
         for (const httpparser::Request::HeaderItem &header: request.headers) {

@@ -5,6 +5,7 @@
 #include <set>
 #include <vector>
 
+#include "../sync/threadsafe_list.h"
 #include "../utils/io_operations.h"
 #include "../utils/select_data.h"
 #include "../../httpparser/src/httpparser/httpresponseparser.h"
@@ -33,7 +34,7 @@ namespace worker_thread_proxy {
 
     typedef struct ResourceInfo {
         httpparser::HttpResponseParser::ParseResult status = httpparser::HttpResponseParser::ParsingIncompleted;
-        std::vector<io::Message *> parts = std::vector<io::Message *>();
+        ThreadsafeList<io::Message> parts = ThreadsafeList<io::Message>();
         io::Message *full_data = nullptr;
         size_t current_length = 0;
         size_t content_length = 0;
@@ -46,8 +47,8 @@ namespace worker_thread_proxy {
         ~ResourceInfo() {
             delete full_data;
             if (free_messages) {
-                for (auto msg: parts) {
-                    delete msg;
+                for (auto part : parts) {
+                    delete part;
                 }
             }
         }

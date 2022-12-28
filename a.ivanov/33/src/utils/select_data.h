@@ -3,6 +3,7 @@
 
 #include <cstdlib>
 #include <cassert>
+#include <pthread.h>
 
 namespace io {
     class SelectData {

@@ -3,6 +3,7 @@
 
 #include <map>
 #include <cassert>
+#include <pthread.h>
 
 #include "cache.h"
 

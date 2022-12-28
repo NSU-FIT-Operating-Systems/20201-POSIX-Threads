@@ -49,6 +49,7 @@ namespace worker_thread_proxy {
         size_t worker_threads_count = 1;
         size_t current_worker_id = 0;
 
+        int signal_fd = -1;
         int proxy_socket = 0;
         io::SelectData *selected;
         aiwannafly::Cache<ResourceInfo> *cache;
