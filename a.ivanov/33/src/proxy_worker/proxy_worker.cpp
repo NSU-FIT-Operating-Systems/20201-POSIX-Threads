@@ -331,7 +331,7 @@ namespace worker_thread_proxy {
                 resource->subscribers.insert(Subscriber(selected, client_fd, &clients->at(client_fd)));
                 cache->get(res_name)->unlock();
             }
-            log("It's size : " + std::to_string(resource->current_length));
+            log("It's size : " + std::to_string(resource->cur_length));
             clients->at(client_fd).res_name = res_name;
             clients->at(client_fd).message_queue.clear();
             if (!resource->parts.empty()) {
@@ -350,13 +350,13 @@ namespace worker_thread_proxy {
                 }
                 int sd = ret_val;
                 assert(servers->contains(sd));
-                servers->at(sd).message_queue.push_back(request_message);
                 if (!cache->contains(res_name)) {
                     cache->put(res_name, new ResourceInfo());
                 }
                 cache->get(res_name)->lock();
                 cache->get(res_name)->subscribers.insert(Subscriber(selected, client_fd, &clients->at(client_fd)));
                 cache->get(res_name)->unlock();
+                servers->at(sd).message_queue.push_back(request_message);
                 if (servers->contains(sd)) {
                     log("Server res name : " + servers->at(sd).res_name);
                 }
@@ -389,66 +389,74 @@ namespace worker_thread_proxy {
             cache->put(res_name, new ResourceInfo);
         }
 //        log("Received " + std::to_string(new_part->len) + " bytes");
-        auto resource = cache->get(res_name);
-        resource->parts.push_back(new_part);
+        auto res = cache->get(res_name);
+        if (res->status == httpparser::HttpResponseParser::ParsingCompleted) {
+            delete new_part;
+            return status_code::SUCCESS;
+        }
+        res->parts.push_back(new_part);
         io::Message *full_msg = new_part;
-        if (resource->content_length == 0) {
-            if (resource->full_data != nullptr) {
-                full_msg = resource->full_data;
-                bool added = io::AppendMsg(resource->full_data, new_part);
+        if (res->content_length == 0) {
+            if (res->full_data != nullptr) {
+                full_msg = res->full_data;
+                bool added = io::AppendMsg(res->full_data, new_part);
                 if (!added) {
                     return status_code::FAIL;
                 }
             } else {
-                resource->full_data = io::copy(new_part);
+                res->full_data = io::copy(new_part);
             }
         }
-        resource->current_length += new_part->len;
-        if (resource->content_length > resource->current_length) {
-            notifySubscribers(res_name, resource);
+        res->cur_length += new_part->len;
+        if (res->content_length > res->cur_length) {
+            notifySubscribers(res_name, res);
             return status_code::SUCCESS;
-        } else if (resource->content_length == resource->current_length && resource->content_length > 0) {
-            notifySubscribers(res_name, resource);
-            resource->status = httpparser::HttpResponseParser::ParsingCompleted;
-            delete resource->full_data;
-            resource->full_data = nullptr;
+        } else if (res->content_length == res->cur_length && res->content_length > 0) {
+            notifySubscribers(res_name, res);
+            res->status = httpparser::HttpResponseParser::ParsingCompleted;
+            delete res->full_data;
+            res->full_data = nullptr;
             return status_code::SUCCESS;
         }
         httpparser::Response response;
         httpparser::HttpResponseParser parser;
-        httpparser::HttpResponseParser::ParseResult res = parser.parse(response, full_msg->data,
+        httpparser::HttpResponseParser::ParseResult parse_res = parser.parse(response, full_msg->data,
                                                                        full_msg->data + full_msg->len);
-        if (res == httpparser::HttpResponseParser::ParsingError) {
+        if (parse_res == httpparser::HttpResponseParser::ParsingError) {
+            log("Current resource len: " + std::to_string(res->cur_length));
+            log("Content length: " + std::to_string(res->content_length));
+            log(res->status == httpparser::HttpResponseParser::ParsingCompleted ? "Completed" : "Not completed");
             logError("Failed to parse response of " + res_name);
             return status_code::FAIL;
         }
-        notifySubscribers(res_name, resource);
-        if (res == httpparser::HttpResponseParser::ParsingIncompleted) {
+        notifySubscribers(res_name, res);
+        if (parse_res == httpparser::HttpResponseParser::ParsingIncompleted) {
             auto content_length_header = std::find_if(response.headers.begin(), response.headers.end(),
                                                       [&](const httpparser::Response::HeaderItem &item) {
                                                           return item.name == "Content-Length";
                                                       });
             if (content_length_header != response.headers.end()) {
                 size_t content_length = std::stoul(content_length_header->value);
-                resource->content_length = content_length;
+                res->content_length = content_length;
                 assert(full_msg->len > response.content.size());
                 size_t sub = full_msg->len - response.content.size();
                 if (sub > 0) {
-                    resource->content_length += sub;
+                    res->content_length += sub;
                 }
-                log("Content-Length : " + std::to_string(resource->content_length));
+                log("Sub : " + std::to_string(sub));
+                log("Content-Length : " + std::to_string(res->content_length));
             }
             log("Response of " + res_name + " is not complete, it's current length: " +
                 std::to_string(full_msg->len));
-            assert(resource->status == httpparser::HttpResponseParser::ParsingIncompleted);
+            assert(res->status == httpparser::HttpResponseParser::ParsingIncompleted);
             return status_code::SUCCESS;
         }
         log("Parsed response of " + res_name + std::string(" code: ") + std::to_string(response.statusCode));
-        resource->status = httpparser::HttpResponseParser::ParsingCompleted;
-        log("Full bytes length : " + std::to_string(resource->full_data->len));
-        log("Full parts count : " + std::to_string(resource->parts.size()));
-        delete resource->full_data;
-        resource->full_data = nullptr;
+        res->status = httpparser::HttpResponseParser::ParsingCompleted;
+        log("Full bytes length : " + std::to_string(res->full_data->len));
+        log("Full parts count : " + std::to_string(res->parts.size()));
+        delete res->full_data;
+        res->full_data = nullptr;
         return status_code::SUCCESS;
     }
 

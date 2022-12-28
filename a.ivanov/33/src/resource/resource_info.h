@@ -37,7 +37,7 @@ namespace worker_thread_proxy {
         httpparser::HttpResponseParser::ParseResult status = httpparser::HttpResponseParser::ParsingIncompleted;
         ThreadsafeList<io::Message> parts = ThreadsafeList<io::Message>();
         io::Message *full_data = nullptr;
-        size_t current_length = 0;
+        size_t cur_length = 0;
         size_t content_length = 0;
         bool free_messages = true;
         // vector of socket descriptors of clients who wait for the resource
