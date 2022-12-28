@@ -74,7 +74,6 @@ void* child(void* blah) {
 	}
 
 	unlock(2);
-	pthread_mutex_destroy(getMtx(2));
 
 	return NULL;
 }
@@ -123,10 +122,12 @@ int main(int argc, char** argv) {
 	}
 
 	unlock(1);
+	pthread_join(thread_id, NULL);
+
+	pthread_mutex_destroy(getMtx(2));
 	pthread_mutex_destroy(getMtx(1));
 	pthread_mutex_destroy(getMtx(0));
 
-	pthread_join(thread_id, NULL); // Explicit join to keep valgrind happy
 
 	pthread_exit(NULL);
 }
