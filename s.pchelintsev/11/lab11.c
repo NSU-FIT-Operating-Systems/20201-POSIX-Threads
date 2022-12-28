@@ -25,6 +25,10 @@ static void unlock(int n) {
 	pthread_mutex_unlock(&mtxes[n]);
 }
 
+static pthread_mutex_t* getMtx(int n) {
+	return &mtxes[n];
+}
+
 bool child_ran = false;
 
 void child_op() {
@@ -70,6 +74,7 @@ void* child(void* blah) {
 	}
 
 	unlock(2);
+	pthread_mutex_destroy(getMtx(2));
 
 	return NULL;
 }
@@ -118,6 +123,10 @@ int main(int argc, char** argv) {
 	}
 
 	unlock(1);
+	pthread_mutex_destroy(getMtx(1));
+	pthread_mutex_destroy(getMtx(0));
+
+	pthread_join(thread_id, NULL); // Explicit join to keep valgrind happy
 
 	pthread_exit(NULL);
 }
