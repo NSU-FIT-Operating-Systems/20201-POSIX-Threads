@@ -33,6 +33,7 @@ namespace worker_thread_proxy {
     } Subscriber;
 
     typedef struct ResourceInfo {
+    public:
         httpparser::HttpResponseParser::ParseResult status = httpparser::HttpResponseParser::ParsingIncompleted;
         ThreadsafeList<io::Message> parts = ThreadsafeList<io::Message>();
         io::Message *full_data = nullptr;
@@ -42,7 +43,18 @@ namespace worker_thread_proxy {
         // vector of socket descriptors of clients who wait for the resource
         std::set<Subscriber> subscribers = std::set<Subscriber>();
 
-        ResourceInfo() = default;
+        ResourceInfo() {
+            mutex = new pthread_mutex_t;
+            pthread_mutex_init(mutex, nullptr);
+        }
+
+        void lock() {
+            pthread_mutex_lock(mutex);
+        }
+
+        void unlock() {
+            pthread_mutex_unlock(mutex);
+        }
 
         ~ResourceInfo() {
             delete full_data;
@@ -51,7 +63,12 @@ namespace worker_thread_proxy {
                     delete part;
                 }
             }
+            pthread_mutex_destroy(mutex);
+            delete mutex;
         }
+
+    private:
+        pthread_mutex_t *mutex;
     } ResourceInfo;
 }
 

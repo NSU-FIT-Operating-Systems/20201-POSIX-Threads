@@ -65,8 +65,7 @@ namespace worker_thread_proxy {
         assert(worker_threads_count >= 1);
         for (size_t i = 0; i < worker_threads_count; i++) {
             auto worker = new Worker();
-            int notice_fd = eventfd(0, 0);
-            worker->runner = new ProxyWorker(notice_fd, signal_fd, cache);
+            worker->runner = new ProxyWorker(signal_fd, cache);
             int code = pthread_create(&worker->tid, nullptr, launchWorker, worker->runner);
             if (code < 0) {
                 return status_code::FAIL;
@@ -82,7 +81,7 @@ namespace worker_thread_proxy {
             logError("Could not init and bind proxy socket");
             return;
         }
-        ret_val = initSignalHandlers();
+        initSignalHandlers();
         ret_val = launchWorkerThreads();
         if (ret_val == status_code::FAIL) {
             logErrorWithErrno("Could launch worker threads");
@@ -138,17 +137,12 @@ namespace worker_thread_proxy {
             close(new_client_fd);
             return status_code::FAIL;
         }
-        int notice_fd = workers.at(current_worker_id)->runner->getNoticeFd();
+        auto worker_selected = workers.at(current_worker_id)->runner->getSelected();
         current_worker_id++;
         if (current_worker_id == worker_threads_count) {
             current_worker_id = 0;
         }
-        assert(notice_fd > 0);
-        int code = eventfd_write(notice_fd, new_client_fd);
-        if (code < 0) {
-            logError("FD : " + std::to_string(notice_fd));
-            return status_code::FAIL;
-        }
+        worker_selected->addFd(new_client_fd, io::SelectData::READ);
         log("Sent fd " + std::to_string(new_client_fd) + " to a worker thread");
         return status_code::SUCCESS;
     }

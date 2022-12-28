@@ -22,12 +22,11 @@
 namespace worker_thread_proxy {
     static const int HTTP_PORT = 80;
 
-    ProxyWorker::ProxyWorker(int notice_fd, int signal_fd, aiwannafly::Cache<ResourceInfo> *cache) {
+    ProxyWorker::ProxyWorker(int signal_fd, aiwannafly::Cache<ResourceInfo> *cache) {
         assert(cache);
         selected = new io::SelectData();
         clients = new std::map<int, ClientInfo>();
         servers = new std::map<int, ServerInfo>();
-        this->notice_fd = notice_fd;
         this->signal_fd = signal_fd;
         this->cache = cache;
         DNS_map = new std::map<std::string, struct hostent *>();
@@ -42,7 +41,6 @@ namespace worker_thread_proxy {
     }
 
     int ProxyWorker::run() {
-        selected->addFd(notice_fd, io::SelectData::READ);
         selected->addFd(signal_fd, io::SelectData::READ);
         fd_set constant_read_set;
         fd_set constant_write_set;
@@ -54,16 +52,22 @@ namespace worker_thread_proxy {
             memcpy(&constant_read_set, selected->getReadSet(), sizeof(*selected->getReadSet()));
             memcpy(&constant_write_set, selected->getWriteSet(), sizeof(*selected->getWriteSet()));
             int ret_val = select(selected->getMaxFd() + 1, &constant_read_set, &constant_write_set,
-                             nullptr, &timeout);
+                                 nullptr, &timeout);
             if (ret_val == status_code::FAIL) {
                 if (errno != EINTR) {
                     logErrorWithErrno("Error in select");
                     freeResources();
                     return status_code::FAIL;
                 }
+            } else if (ret_val == status_code::TIMEOUT) {
+                for (int fd = 2; fd <= selected->getMaxFd(); ++fd) {
+                    if (clients->contains(fd)) {
+                        updateClientQueue(fd, true);
+                    }
+                }
             }
             int desc_ready = ret_val;
-            for (int fd = 0; fd <= selected->getMaxFd() && desc_ready > 0; ++fd) {
+            for (int fd = 2; fd <= selected->getMaxFd() && desc_ready > 0; ++fd) {
                 if (FD_ISSET(fd, &constant_read_set)) {
                     desc_ready -= 1;
                     //log("Got message");
@@ -110,12 +114,15 @@ namespace worker_thread_proxy {
             logError("Client " + std::to_string(fd) + " disconnects");
             auto res_name = clients->at(fd).res_name;
             if (cache->contains(res_name)) {
-                for (auto sub : cache->get(res_name)->subscribers) {
+                cache->get(res_name)->lock();
+                for (auto sub: cache->get(res_name)->subscribers) {
                     if (sub.fd == fd) {
                         cache->get(res_name)->subscribers.erase(sub);
                         break;
                     }
                 }
+                log("Left subscribers count:" + std::to_string(cache->get(res_name)->subscribers.size()));
+                cache->get(res_name)->unlock();
             }
         }
         clients->erase(fd);
@@ -126,17 +133,6 @@ namespace worker_thread_proxy {
 
     int ProxyWorker::readMessageFrom(int fd) {
         assert(fd > 0);
-        if (fd == notice_fd) {
-            eventfd_t new_client_fd;
-            int code = eventfd_read(fd, &new_client_fd);
-            if (code < 0) {
-                return status_code::FAIL;
-            } else {
-                (*clients)[(int) new_client_fd] = ClientInfo();
-                selected->addFd((int) new_client_fd, io::SelectData::READ);
-                return status_code::SUCCESS;
-            }
-        }
         io::Message *message = io::read_all(fd);
         if (message == nullptr) {
             return status_code::FAIL;
@@ -158,21 +154,35 @@ namespace worker_thread_proxy {
         }
         // so, we've got message. what's next?
         // let's check out who sent it
-         if (servers->contains(fd)) {
+        if (servers->contains(fd)) {
             int ret_val = readServerResponse(fd, message);
             if (ret_val == status_code::FAIL) {
                 delete message;
             }
             return ret_val;
-        } else if (clients->contains(fd)) {
-            int ret_val = readClientRequest(fd, message);
-            if (ret_val == status_code::FAIL) {
-                delete message;
-            }
-            return ret_val;
         }
-        delete message;
-        return status_code::FAIL;
+        if (!clients->contains(fd)) {
+            (*clients)[fd] = ClientInfo();
+        }
+        int ret_val = readClientRequest(fd, message);
+        if (ret_val == status_code::FAIL) {
+            delete message;
+        }
+        return ret_val;
+    }
+
+    void ProxyWorker::updateClientQueue(int fd, bool reset) {
+        if (!clients->contains(fd)) return;
+        size_t msg_count = clients->at(fd).message_queue.size();
+        if (cache->contains(clients->at(fd).res_name) && msg_count == 0) {
+            auto resource = cache->get(clients->at(fd).res_name);
+            std::copy(resource->parts.begin() + (int) clients->at(fd).recv_msg_count,
+                      resource->parts.end(), std::back_inserter(clients->at(fd).message_queue));
+        }
+        msg_count = clients->at(fd).message_queue.size();
+        if (reset && msg_count > 0) {
+            selected->addFd(fd, io::SelectData::WRITE);
+        }
     }
 
     int ProxyWorker::writeMessageTo(int fd) {
@@ -207,14 +217,8 @@ namespace worker_thread_proxy {
         }
         if (clients->contains(fd)) {
             assert(!servers->contains(fd));
+            updateClientQueue(fd, false);
             size_t msg_count = clients->at(fd).message_queue.size();
-            if (cache->contains(clients->at(fd).res_name) && msg_count == 0) {
-                auto resource = cache->get(clients->at(fd).res_name);
-                std::copy(resource->parts.begin() + (int) clients->at(fd).recv_msg_count,
-                          resource->parts.end(), std::back_inserter(clients->at(fd).message_queue));
-            }
-            msg_count = clients->at(fd).message_queue.size();
-
             if (msg_count >= 1) {
                 auto msg = clients->at(fd).message_queue.front();
                 clients->at(fd).message_queue.erase(clients->at(fd).message_queue.begin());
@@ -323,7 +327,9 @@ namespace worker_thread_proxy {
             log("Found " + res_name + " in cache");
             ResourceInfo *resource = cache->get(res_name);
             if (resource->status != httpparser::HttpResponseParser::ParsingCompleted) {
+                cache->get(res_name)->lock();
                 resource->subscribers.insert(Subscriber(selected, client_fd, &clients->at(client_fd)));
+                cache->get(res_name)->unlock();
             }
             log("It's size : " + std::to_string(resource->current_length));
             clients->at(client_fd).res_name = res_name;
@@ -348,7 +354,9 @@ namespace worker_thread_proxy {
                 if (!cache->contains(res_name)) {
                     cache->put(res_name, new ResourceInfo());
                 }
+                cache->get(res_name)->lock();
                 cache->get(res_name)->subscribers.insert(Subscriber(selected, client_fd, &clients->at(client_fd)));
+                cache->get(res_name)->unlock();
                 if (servers->contains(sd)) {
                     log("Server res name : " + servers->at(sd).res_name);
                 }
@@ -366,10 +374,12 @@ namespace worker_thread_proxy {
         if (resource->parts.size() == 1) {
             log("Count of subscribers : " + std::to_string(resource->subscribers.size()));
         }
+        resource->lock();
         for (auto subscriber: resource->subscribers) {
             subscriber.client->res_name = res_name;
             subscriber.selected->addFd(subscriber.fd, io::SelectData::WRITE);
         }
+        resource->unlock();
     }
 
     int ProxyWorker::readServerResponse(int server_fd, io::Message *new_part) {
@@ -442,7 +452,7 @@ namespace worker_thread_proxy {
         return status_code::SUCCESS;
     }
 
-    int ProxyWorker::getNoticeFd() const {
-        return notice_fd;
+    io::SelectData *ProxyWorker::getSelected() const {
+        return selected;
     }
 }
