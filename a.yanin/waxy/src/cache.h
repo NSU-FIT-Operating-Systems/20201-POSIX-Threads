@@ -113,7 +113,10 @@ error_t *cache_wr_write(cache_wr_t *self, slice_t slice);
 // This is an idempotent operation.
 void cache_wr_complete(cache_wr_t *self);
 
-// Commit the associated entry to the cache.
+// Commits the associated entry to the cache.
+//
+// If there already is an entry for this resource, it will be replaced if this entry has
+// more written data.
 //
 // After this call new fetches to the resource would return a handle to this entry.
 error_t *cache_wr_commit(cache_wr_t *self);

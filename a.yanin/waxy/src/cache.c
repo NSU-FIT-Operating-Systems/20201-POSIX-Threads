@@ -200,26 +200,43 @@ void cache_free(cache_t *self) {
 static error_t *cache_entry_new_rd(arc_entry_t *arc, cache_rd_t **result);
 static error_t *cache_entry_new_rd_unsync(arc_entry_t *arc, cache_rd_t **result);
 
+// Removes an entry pointed to by `node` from the cache.
+//
+// Returns its last recorded size.
+static size_t cache_remove_entry_unsync(cache_t *self, dlist_entry_node_t *node) {
+    arc_entry_t *arc = dlist_entry_remove(&self->entries, node);
+    cache_entry_t *entry = arc_entry_get(arc);
+
+    // this ensures cache_wr_write doesn't update self->current_size anymore
+    assert_mutex_lock(&entry->mtx);
+    entry->cache = NULL;
+    size_t size = string_len(&entry->buf);
+    assert_mutex_unlock(&entry->mtx);
+
+    dlist_entry_node_t *removed_node = NULL;
+    // only fails if the key was not found -- our invariant ensures this can't happen
+    error_assert(error_from_common(
+        hash_entry_remove(&self->map, &(url_t const *) { &entry->url }, NULL, &removed_node)));
+
+    arc_entry_free(arc);
+
+    assert(size <= self->current_size);
+    assert(node == removed_node);
+
+    self->current_size -= size;
+
+    return size;
+}
+
 static void cache_evict_if_necessary_unsync(cache_t *self) {
     while (self->current_size > self->size_limit) {
-        arc_entry_t *arc = dlist_entry_remove(&self->entries, dlist_entry_head_mut(&self->entries));
-        cache_entry_t *entry = arc_entry_get(arc);
+        dlist_entry_node_t *head = dlist_entry_head_mut(&self->entries);
 
-        // this ensures cache_wr_write doesn't update self->current_size anymore
-        assert_mutex_lock(&entry->mtx);
-        entry->cache = NULL;
-        size_t size = string_len(&entry->buf);
-        assert_mutex_unlock(&entry->mtx);
+        if (head == NULL) {
+            break;
+        }
 
-        dlist_entry_node_t *node = NULL;
-        // only fails if the key was not found -- our invariant ensures this can't happen
-        error_assert(error_from_common(
-            hash_entry_remove(&self->map, &(url_t const *) { &entry->url }, NULL, &node)));
-
-        arc_entry_free(arc);
-
-        assert(size <= self->current_size);
-        self->current_size -= size;
+        cache_remove_entry_unsync(self, head);
     }
 }
 
@@ -603,7 +620,7 @@ error_t *cache_wr_write(cache_wr_t *self, slice_t slice) {
 
     cache_t *cache = entry->cache;
 
-    if (cache != NULL) {
+    if (cache != NULL && entry->committed) {
         atomic_fetch_add(&cache->current_size, slice.len);
     }
 
@@ -643,6 +660,28 @@ error_t *cache_wr_commit(cache_wr_t *self) {
     // There are no references to this entry in the cache yet.
     // Therefore, the cache can't possibly be able to lock entry->mtx, which would cause a deadlock.
     assert_mutex_lock(&cache->mtx);
+
+    dlist_entry_node_t **stored_node_ptr = hash_entry_get_mut(
+        &cache->map,
+        &(url_t const *) { &entry->url }
+    );
+
+    if (stored_node_ptr != NULL) {
+        dlist_entry_node_t *stored_node = *stored_node_ptr;
+        arc_entry_t *stored_arc = *dlist_entry_get_mut(stored_node);
+        cache_entry_t *stored_entry = arc_entry_get(stored_arc);
+
+        // deadlock-safe for the same reason as above: nobody knows about us yet
+        assert_mutex_lock(&stored_entry->mtx);
+        size_t stored_size = string_len(&stored_entry->buf);
+        assert_mutex_unlock(&stored_entry->mtx);
+
+        if (stored_size < string_len(&entry->buf)) {
+            goto success;
+        }
+
+        cache_remove_entry_unsync(cache, stored_node);
+    }
 
     dlist_entry_node_t *node = NULL;
     arc_entry_t *arc_shared = arc_entry_share(arc);
