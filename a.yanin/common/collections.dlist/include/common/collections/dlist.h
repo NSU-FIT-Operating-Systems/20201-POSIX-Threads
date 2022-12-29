@@ -490,6 +490,24 @@ DLIST_STATIC void DLIST_NAME(swap)(DLIST_TYPE *self, DLIST_NODE_TYPE *lhs, DLIST
     }
 }
 
+static bool DLIST_NAME(is_valid)(DLIST_TYPE const *self) {
+    size_t actual_len = 0;
+    DLIST_NODE_TYPE const *actual_end = NULL;
+
+    for (DLIST_NODE_TYPE const *node = self->head;
+            node != NULL;
+            node = node->next, ++actual_len) {
+        assert(node->next == NULL || node->next->prev == node);
+        assert(node->prev == NULL || node->prev->next == node);
+        actual_end = node;
+    }
+
+    assert(self->len == actual_len);
+    assert(self->end == actual_end);
+
+    return true;
+}
+
 DLIST_STATIC void DLIST_NAME(move_before)(
     DLIST_TYPE *self,
     DLIST_NODE_TYPE *node,
@@ -499,6 +517,7 @@ DLIST_STATIC void DLIST_NAME(move_before)(
     assert(node != NULL);
     assert(DLIST_NAME(contains)(self, node));
     assert(before == NULL || DLIST_NAME(contains)(self, before));
+    assert(DLIST_NAME(is_valid)(self));
 
     if (before == node || before == DLIST_NAME(next)(node)) {
         return;
@@ -506,6 +525,8 @@ DLIST_STATIC void DLIST_NAME(move_before)(
 
     if (before == NULL) {
         DLIST_NAME(move_after)(self, node, DLIST_NAME(end_mut)(self));
+
+        return;
     }
 
     DLIST_NODE_TYPE *node_prev = DLIST_NAME(prev_mut)(node);
@@ -525,6 +546,8 @@ DLIST_STATIC void DLIST_NAME(move_before)(
     if (node == self->end) {
         self->end = node_prev;
     }
+
+    assert(DLIST_NAME(is_valid)(self));
 }
 
 DLIST_STATIC void DLIST_NAME(move_after)(
@@ -536,6 +559,7 @@ DLIST_STATIC void DLIST_NAME(move_after)(
     assert(node != NULL);
     assert(DLIST_NAME(contains)(self, node));
     assert(after == NULL || DLIST_NAME(contains)(self, after));
+    assert(DLIST_NAME(is_valid)(self));
 
     if (after == node || after == DLIST_NAME(prev)(node)) {
         return;
@@ -543,6 +567,8 @@ DLIST_STATIC void DLIST_NAME(move_after)(
 
     if (after == NULL) {
         DLIST_NAME(move_after)(self, node, DLIST_NAME(head_mut)(self));
+
+        return;
     }
 
     DLIST_NODE_TYPE *node_prev = DLIST_NAME(prev_mut)(node);
@@ -562,6 +588,7 @@ DLIST_STATIC void DLIST_NAME(move_after)(
     } else if (after == self->end) {
         self->end = node;
     }
+    assert(DLIST_NAME(is_valid)(self));
 }
 
 #endif // #if (DLIST_CONFIG) & COLLECTION_DEFINE

@@ -1,1 +1,1 @@
-option('pthreads', type: 'feature', value: 'auto')
+option('pthreads', type: 'feature', value: 'enabled')

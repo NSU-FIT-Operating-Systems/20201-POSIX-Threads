@@ -1,5 +1,5 @@
 project('waxy', 'c',
-  default_options: ['warning_level=3', 'c_std=c2x', 'werror=true', 'default_library=static', 'pthreads=true'])
+  default_options: ['warning_level=3', 'c_std=c2x', 'werror=true', 'default_library=static'])
 
 common_modules = subproject('common', default_options: ['default_library=static']).get_variable('modules')
 
