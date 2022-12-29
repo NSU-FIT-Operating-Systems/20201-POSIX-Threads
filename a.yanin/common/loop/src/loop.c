@@ -48,9 +48,13 @@ typedef struct {
 
 struct loop {
     vec_handler_t handlers;
+#ifndef COMMON_PTHREADS_DISABLED
     pthread_mutex_t pending_mtx;
+#endif
     vec_handler_t pending_handlers;
+#ifndef COMMON_PTHREADS_DISABLED
     pthread_mutex_t error_mtx;
+#endif
     vec_error_t errors;
     executor_t *executor;
     // this is a weak reference to `notify`
@@ -88,6 +92,7 @@ error_t *loop_new(executor_t *executor, loop_t **result) {
     arc_handler_t *notify = arc_handler_new((handler_t *) self->notify);
     vec_handler_push(&self->pending_handlers, notify);
 
+#ifndef COMMON_PTHREADS_DISABLED
     pthread_mutexattr_t mtx_attr;
     error_assert(error_wrap("Could not initialize mutex attributes",
         error_from_errno(pthread_mutexattr_init(&mtx_attr))));
@@ -99,6 +104,7 @@ error_t *loop_new(executor_t *executor, loop_t **result) {
         pthread_mutex_init(&self->error_mtx, &mtx_attr))));
 
     pthread_mutexattr_destroy(&mtx_attr);
+#endif
 
     *result = self;
 
@@ -130,8 +136,10 @@ void loop_free(loop_t *self) {
         error_free(vec_error_get_mut(&self->errors, i));
     }
 
+#ifndef COMMON_PTHREADS_DISABLED
     pthread_mutex_destroy(&self->error_mtx);
     pthread_mutex_destroy(&self->pending_mtx);
+#endif
 
     vec_error_free(&self->errors);
     vec_handler_free(&self->pending_handlers);
@@ -141,7 +149,9 @@ void loop_free(loop_t *self) {
 }
 
 error_t *loop_register(loop_t *self, handler_t *handler) {
+#ifndef COMMON_PTHREADS_DISABLED
     assert_mutex_lock(&self->pending_mtx);
+#endif
 
     error_t *err = NULL;
     bool pushed = false;
@@ -158,7 +168,9 @@ error_t *loop_register(loop_t *self, handler_t *handler) {
     handler->loop = self;
 
 fail:
+#ifndef COMMON_PTHREADS_DISABLED
     assert_mutex_unlock(&self->pending_mtx);
+#endif
 
     if (pushed) {
         loop_interrupt(self);
@@ -170,7 +182,9 @@ fail:
 static error_t *loop_process_registrations(loop_t *self) {
     error_t *err = NULL;
 
+#ifndef COMMON_PTHREADS_DISABLED
     assert_mutex_lock(&self->pending_mtx);
+#endif
 
     for (size_t i = 0; i < vec_handler_len(&self->pending_handlers); ++i) {
         arc_handler_t *handler = arc_handler_share(*vec_handler_get(&self->pending_handlers, i));
@@ -201,7 +215,9 @@ push_fail:
 
     vec_handler_clear(&self->pending_handlers);
 
+#ifndef COMMON_PTHREADS_DISABLED
     assert_mutex_unlock(&self->pending_mtx);
+#endif
 
     size_t handler_count = vec_handler_len(&self->handlers);
 
@@ -371,9 +387,13 @@ static error_t *loop_handler_task_cb(task_ctx_t *ctx) {
     }
 
     if (err) {
+#ifndef COMMON_PTHREADS_DISABLED
         assert_mutex_lock(&ctx->loop->pending_mtx);
+#endif
         error_t *push_err = error_from_common(vec_error_push(&ctx->loop->errors, err));
+#ifndef COMMON_PTHREADS_DISABLED
         assert_mutex_unlock(&ctx->loop->pending_mtx);
+#endif
 
         if (push_err) {
             err = error_combine(push_err, err);
@@ -467,7 +487,9 @@ fail:
 static error_t *loop_process_task_results(loop_t *self) {
     error_t *err = NULL;
 
+#ifndef COMMON_PTHREADS_DISABLED
     assert_mutex_lock(&self->error_mtx);
+#endif
 
     for (size_t i = 0; i < vec_error_len(&self->errors); ++i) {
         error_t *task_err = *vec_error_get(&self->errors, i);
@@ -481,7 +503,9 @@ static error_t *loop_process_task_results(loop_t *self) {
 
     vec_error_clear(&self->errors);
 
+#ifndef COMMON_PTHREADS_DISABLED
     assert_mutex_unlock(&self->error_mtx);
+#endif
 
     return err;
 }

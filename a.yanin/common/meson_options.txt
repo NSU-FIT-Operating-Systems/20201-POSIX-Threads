@@ -1,1 +1,2 @@
 option('libbacktrace', type: 'feature', value: 'auto')
+option('pthreads', type: 'feature', value: 'enabled', yield: true)

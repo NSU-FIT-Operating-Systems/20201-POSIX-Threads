@@ -1,7 +1,12 @@
 project('common', 'c',
   default_options: ['warning_level=3', 'c_std=c2x', 'werror=true', 'default_library=static'])
 
+pthreads_dep = dependency('threads', required: get_option('pthreads'))
+
 modules = {}
+
+# The common library configuration.
+subdir('config')
 
 # A primitive logging library.
 subdir('log')

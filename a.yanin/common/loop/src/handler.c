@@ -21,6 +21,7 @@ void handler_init(handler_t *self, handler_vtable_t const *vtable, int fd) {
     self->current_flags = 0;
     self->pending_flags = 0;
 
+#ifndef COMMON_PTHREADS_DISABLED
     pthread_mutexattr_t mtx_attr;
     error_assert(error_wrap("Could not initialize mutex attributes",
         error_from_errno(pthread_mutexattr_init(&mtx_attr))));
@@ -30,6 +31,7 @@ void handler_init(handler_t *self, handler_vtable_t const *vtable, int fd) {
         pthread_mutex_init(&self->mtx, &mtx_attr))));
 
     pthread_mutexattr_destroy(&mtx_attr);
+#endif
 }
 
 void handler_free(handler_t *self) {
@@ -71,11 +73,17 @@ loop_t *handler_loop(handler_t *self) {
 }
 
 void handler_lock(handler_t *self) {
+    (void) self;
+#ifndef COMMON_PTHREADS_DISABLED
     assert_mutex_lock(&self->mtx);
+#endif
 }
 
 void handler_unlock(handler_t *self) {
+    (void) self;
+#ifndef COMMON_PTHREADS_DISABLED
     assert_mutex_unlock(&self->mtx);
+#endif
 }
 
 int handler_fd(handler_t const *self) {

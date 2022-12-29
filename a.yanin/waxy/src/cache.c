@@ -1,9 +1,13 @@
 #include "cache.h"
 
+#include <stdatomic.h>
+
+#ifndef WAXY_PTHREADS_DISABLED
+#include <pthread.h>
+#endif
+
 #include <common/error-codes/adapter.h>
 #include <common/loop/loop.h>
-#include <pthread.h>
-#include <stdatomic.h>
 
 #include "util.h"
 
@@ -109,7 +113,9 @@ static bool url_ptr_eq(url_t const *const *lhs, url_t const *const *rhs) {
 // invariant: an url is present in the map iff there is exactly one `dlist_entry_node_t` that points
 // to a `cache_entry_t` with that url.
 struct cache {
+#ifndef WAXY_PTHREADS_DISABLED
     pthread_mutex_t mtx;
+#endif
     hash_entry_t map;
     dlist_entry_t entries;
     size_t size_limit;
@@ -117,7 +123,9 @@ struct cache {
 };
 
 struct cache_entry {
+#ifndef WAXY_PTHREADS_DISABLED
     pthread_mutex_t mtx;
+#endif
     url_t url;
     vec_rd_t handles;
     string_t buf;
@@ -147,6 +155,7 @@ error_t *cache_new(size_t size_limit, cache_t **result) {
     err = error_wrap("Could not allocate memory for the cache", OK_IF(self != NULL));
     if (err) goto calloc_fail;
 
+#ifndef WAXY_PTHREADS_DISABLED
     pthread_mutexattr_t mtx_attr;
     err = error_wrap("Could not initialize mutex attributes", error_from_errno(
         pthread_mutexattr_init(&mtx_attr)));
@@ -156,6 +165,7 @@ error_t *cache_new(size_t size_limit, cache_t **result) {
         pthread_mutex_init(&self->mtx, &mtx_attr)));
     pthread_mutexattr_destroy(&mtx_attr);
     if (err) goto mtx_init_fail;
+#endif
 
     err = error_from_common(hash_entry_new(
         url_ptr_primary_hasher, url_ptr_secondary_hasher,
@@ -172,10 +182,12 @@ error_t *cache_new(size_t size_limit, cache_t **result) {
     return err;
 
 hash_new_fail:
+#ifndef WAXY_PTHREADS_DISABLED
     pthread_mutex_destroy(&self->mtx);
 
 mtx_init_fail:
 mtx_attr_init_fail:
+#endif
     free(self);
 
 calloc_fail:
@@ -193,7 +205,11 @@ void cache_free(cache_t *self) {
     }
 
     dlist_entry_free(&self->entries);
+
+#ifndef WAXY_PTHREADS_DISABLED
     error_assert(error_from_errno(pthread_mutex_destroy(&self->mtx)));
+#endif
+
     free(self);
 }
 
@@ -208,10 +224,14 @@ static size_t cache_remove_entry_unsync(cache_t *self, dlist_entry_node_t *node)
     cache_entry_t *entry = arc_entry_get(arc);
 
     // this ensures cache_wr_write doesn't update self->current_size anymore
+#ifndef WAXY_PTHREADS_DISABLED
     assert_mutex_lock(&entry->mtx);
+#endif
     entry->cache = NULL;
     size_t size = string_len(&entry->buf);
+#ifndef WAXY_PTHREADS_DISABLED
     assert_mutex_unlock(&entry->mtx);
+#endif
 
     dlist_entry_node_t *removed_node = NULL;
     // only fails if the key was not found -- our invariant ensures this can't happen
@@ -256,6 +276,7 @@ static error_t *cache_create_entry_unsync(
     err = error_wrap("Could not allocate a write handle", OK_IF(wr != NULL));
     if (err) goto wr_calloc_fail;
 
+#ifndef WAXY_PTHREADS_DISABLED
     pthread_mutexattr_t mtx_attr;
     err = error_wrap("Could not initialize mutex attributes", error_from_errno(
         pthread_mutexattr_init(&mtx_attr)));
@@ -265,6 +286,7 @@ static error_t *cache_create_entry_unsync(
         pthread_mutex_init(&entry->mtx, &mtx_attr)));
     pthread_mutexattr_destroy(&mtx_attr);
     if (err) goto mtx_init_fail;
+#endif
 
     err = error_wrap("Could not copy the URL", url_copy(url, &entry->url));
     if (err) goto url_copy_fail;
@@ -308,10 +330,12 @@ string_new_fail:
     string_free(&entry->url.buf);
 
 url_copy_fail:
+#ifndef WAXY_PTHREADS_DISABLED
     error_assert(error_from_errno(pthread_mutex_destroy(&entry->mtx)));
 
 mtx_init_fail:
 mtxattr_init_fail:
+#endif
     free(wr);
 
 wr_calloc_fail:
@@ -332,10 +356,14 @@ static error_t *cache_create_handle_unsync(
 
     arc_entry_t *arc = *dlist_entry_get_mut(node);
     cache_entry_t *entry = arc_entry_get(arc);
+#ifndef WAXY_PTHREADS_DISABLED
     assert_mutex_lock(&entry->mtx);
+#endif
 
     if (entry->state == CACHE_ENTRY_INVALID) {
+#ifndef WAXY_PTHREADS_DISABLED
         assert_mutex_unlock(&entry->mtx);
+#endif
 
         cache_evict_if_necessary_unsync(self);
 
@@ -344,7 +372,9 @@ static error_t *cache_create_handle_unsync(
 
     cache_rd_t *rd = NULL;
     err = cache_entry_new_rd_unsync(arc_entry_share(arc), &rd);
+#ifndef WAXY_PTHREADS_DISABLED
     assert_mutex_unlock(&entry->mtx);
+#endif
     if (err) goto new_rd_fail;
 
     dlist_entry_move_before(&self->entries, node, NULL);
@@ -367,7 +397,9 @@ error_t *cache_fetch(
 ) {
     error_t *err = NULL;
 
+#ifndef WAXY_PTHREADS_DISABLED
     assert_mutex_lock(&self->mtx);
+#endif
 
     dlist_entry_node_t **ptr = hash_entry_get_mut(&self->map, &url);
     cache_rd_t *rd = NULL;
@@ -381,7 +413,9 @@ error_t *cache_fetch(
         err = cache_create_handle_unsync(self, *ptr, url, &rd, &wr);
     }
 
+#ifndef WAXY_PTHREADS_DISABLED
     assert_mutex_unlock(&self->mtx);
+#endif
 
     if (err) goto create_fail;
 
@@ -399,7 +433,9 @@ static void rd_free(cache_rd_t *self) {
     if (self->registered) {
         arc_entry_t *arc = self->entry;
         cache_entry_t *entry = arc_entry_get(arc);
+#ifndef WAXY_PTHREADS_DISABLED
         assert_mutex_lock(&entry->mtx);
+#endif
 
         for (size_t i = 0; i < vec_rd_len(&entry->handles); ++i) {
             if (*vec_rd_get(&entry->handles, i) == self) {
@@ -410,7 +446,9 @@ static void rd_free(cache_rd_t *self) {
             }
         }
 
+#ifndef WAXY_PTHREADS_DISABLED
         assert_mutex_unlock(&entry->mtx);
+#endif
     }
 
     arc_entry_free(self->entry);
@@ -421,12 +459,16 @@ static error_t *rd_process(cache_rd_t *self, loop_t *loop, poll_flags_t) {
 
     arc_entry_t *arc = self->entry;
     cache_entry_t *entry = arc_entry_get(arc);
+#ifndef WAXY_PTHREADS_DISABLED
     assert_mutex_lock(&entry->mtx);
+#endif
 
     size_t new_len = string_len(&entry->buf);
     cache_entry_state_t state = entry->state;
 
+#ifndef WAXY_PTHREADS_DISABLED
     assert_mutex_unlock(&entry->mtx);
+#endif
 
     log_printf(LOG_DEBUG, "rd_process: new_len = %zu, state = %d, self->count = %zu, self->last_state = %d",
         new_len, state, self->count, self->last_state);
@@ -507,19 +549,25 @@ calloc_fail:
 static error_t *cache_entry_new_rd(arc_entry_t *arc, cache_rd_t **result) {
     error_t *err = NULL;
 
+#ifndef WAXY_PTHREADS_DISABLED
     cache_entry_t *entry = arc_entry_get(arc);
     assert_mutex_lock(&entry->mtx);
+#endif
 
     err = cache_entry_new_rd_unsync(arc_entry_share(arc), result);
 
+#ifndef WAXY_PTHREADS_DISABLED
     assert_mutex_unlock(&entry->mtx);
+#endif
     arc_entry_free(arc);
 
     return err;
 }
 
 static void cache_entry_free(cache_entry_t *self) {
+#ifndef WAXY_PTHREADS_DISABLED
     pthread_mutex_destroy(&self->mtx);
+#endif
     string_free(&self->url.buf);
     vec_rd_free(&self->handles);
     string_free(&self->buf);
@@ -565,7 +613,9 @@ void cache_rd_set_on_update(cache_rd_t *self, cache_on_update_cb_t on_update) {
 size_t cache_rd_read(cache_rd_t *self, char *buf, size_t size, bool *eof) {
     arc_entry_t *arc = self->entry;
     cache_entry_t *entry = arc_entry_get(arc);
+#ifndef WAXY_PTHREADS_DISABLED
     assert_mutex_lock(&entry->mtx);
+#endif
 
     size_t unread_count = string_len(&entry->buf) - self->count;
 
@@ -580,7 +630,9 @@ size_t cache_rd_read(cache_rd_t *self, char *buf, size_t size, bool *eof) {
         *eof = true;
     }
 
+#ifndef WAXY_PTHREADS_DISABLED
     assert_mutex_unlock(&entry->mtx);
+#endif
 
     return size;
 }
@@ -590,13 +642,17 @@ void cache_wr_free(cache_wr_t *self) {
 
     arc_entry_t *arc = self->entry;
     cache_entry_t *entry = arc_entry_get(arc);
+#ifndef WAXY_PTHREADS_DISABLED
     assert_mutex_lock(&entry->mtx);
+#endif
 
     if (entry->state == CACHE_ENTRY_PARTIAL) {
         cache_entry_set_state_unsync(entry, CACHE_ENTRY_INVALID);
     }
 
+#ifndef WAXY_PTHREADS_DISABLED
     assert_mutex_unlock(&entry->mtx);
+#endif
     arc_entry_free(arc);
     free(self);
 }
@@ -610,7 +666,9 @@ error_t *cache_wr_write(cache_wr_t *self, slice_t slice) {
 
     arc_entry_t *arc = self->entry;
     cache_entry_t *entry = arc_entry_get(arc);
+#ifndef WAXY_PTHREADS_DISABLED
     assert_mutex_lock(&entry->mtx);
+#endif
 
     err = error_wrap("Writing to a complete entry", OK_IF(entry->state != CACHE_ENTRY_COMPLETE));
     if (err) goto complete_fail;
@@ -628,7 +686,9 @@ error_t *cache_wr_write(cache_wr_t *self, slice_t slice) {
 
 append_fail:
 complete_fail:
+#ifndef WAXY_PTHREADS_DISABLED
     assert_mutex_unlock(&entry->mtx);
+#endif
 
     return err;
 }
@@ -636,11 +696,15 @@ complete_fail:
 void cache_wr_complete(cache_wr_t *self) {
     arc_entry_t *arc = self->entry;
     cache_entry_t *entry = arc_entry_get(arc);
+#ifndef WAXY_PTHREADS_DISABLED
     assert_mutex_lock(&entry->mtx);
+#endif
 
     cache_entry_set_state_unsync(entry, CACHE_ENTRY_COMPLETE);
 
+#ifndef WAXY_PTHREADS_DISABLED
     assert_mutex_unlock(&entry->mtx);
+#endif
 }
 
 error_t *cache_wr_commit(cache_wr_t *self) {
@@ -648,7 +712,9 @@ error_t *cache_wr_commit(cache_wr_t *self) {
 
     arc_entry_t *arc = self->entry;
     cache_entry_t *entry = arc_entry_get(arc);
+#ifndef WAXY_PTHREADS_DISABLED
     assert_mutex_lock(&entry->mtx);
+#endif
 
     if (entry->committed) {
         goto committed;
@@ -659,7 +725,9 @@ error_t *cache_wr_commit(cache_wr_t *self) {
 
     // There are no references to this entry in the cache yet.
     // Therefore, the cache can't possibly be able to lock entry->mtx, which would cause a deadlock.
+#ifndef WAXY_PTHREADS_DISABLED
     assert_mutex_lock(&cache->mtx);
+#endif
 
     dlist_entry_node_t **stored_node_ptr = hash_entry_get_mut(
         &cache->map,
@@ -672,9 +740,13 @@ error_t *cache_wr_commit(cache_wr_t *self) {
         cache_entry_t *stored_entry = arc_entry_get(stored_arc);
 
         // deadlock-safe for the same reason as above: nobody knows about us yet
+#ifndef WAXY_PTHREADS_DISABLED
         assert_mutex_lock(&stored_entry->mtx);
+#endif
         size_t stored_size = string_len(&stored_entry->buf);
+#ifndef WAXY_PTHREADS_DISABLED
         assert_mutex_unlock(&stored_entry->mtx);
+#endif
 
         if (stored_size < string_len(&entry->buf)) {
             goto success;
@@ -707,10 +779,14 @@ dlist_append_fail:
     arc_entry_free(arc_shared);
 
 success:
+#ifndef WAXY_PTHREADS_DISABLED
     assert_mutex_unlock(&cache->mtx);
+#endif
 
 committed:
+#ifndef WAXY_PTHREADS_DISABLED
     assert_mutex_unlock(&entry->mtx);
+#endif
 
     return err;
 }

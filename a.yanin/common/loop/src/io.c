@@ -1,6 +1,8 @@
 #include "io.h"
 
+#ifndef COMMON_PTHREADS_DISABLED
 #include <pthread.h>
+#endif
 
 #include <common/error.h>
 #include <common/error-codes/adapter.h>
@@ -14,7 +16,11 @@
 #include <common/collections/vec.h>
 
 static size_t iov_max = 0;
+#ifndef COMMON_PTHREADS_DISABLED
 static pthread_once_t iov_max_once = PTHREAD_ONCE_INIT;
+#else
+static bool iov_max_once = false;
+#endif
 
 static void iov_max_init() {
     long iov_size = -1;
@@ -34,7 +40,14 @@ static void iov_max_init() {
 }
 
 size_t iov_max_size(void) {
+#ifndef COMMON_PTHREADS_DISABLED
     error_assert(error_from_errno(pthread_once(&iov_max_once, iov_max_init)));
+#else
+    if (!iov_max_once) {
+        iov_max_init();
+        iov_max_once = true;
+    }
+#endif
 
     return iov_max;
 }

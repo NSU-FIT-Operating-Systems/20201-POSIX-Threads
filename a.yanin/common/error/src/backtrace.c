@@ -5,7 +5,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef COMMON_PTHREADS_DISABLED
 #include <pthread.h>
+#endif
 
 #ifdef BACKTRACE_ENABLED
 #include <backtrace.h>
@@ -21,7 +23,12 @@ struct backtrace {
 };
 
 #if defined(BACKTRACE_SUPPORTED) && defined(BACKTRACE_ENABLED)
+
+#ifndef COMMON_PTHREADS_DISABLED
 static pthread_once_t backtrace_state_init = PTHREAD_ONCE_INIT;
+#else
+static bool backtrace_state_init = false;
+#endif
 
 static struct backtrace_state *backtrace_state = NULL;
 
@@ -30,11 +37,24 @@ static void backtrace_init_on_fail(void *, const char *msg, int) {
 }
 
 static void initialize_backtrace_inner(void) {
-    backtrace_state = backtrace_create_state(NULL, 1, backtrace_init_on_fail, NULL);
+#ifdef COMMON_PTHREADS_DISABLED
+    int threaded = 0;
+#else
+    int threaded = 1;
+#endif
+
+    backtrace_state = backtrace_create_state(NULL, threaded, backtrace_init_on_fail, NULL);
 }
 
 static void initialize_backtrace(void) {
+#ifndef COMMON_PTHREADS_DISABLED
     pthread_once(&backtrace_state_init, initialize_backtrace_inner);
+#else
+    if (!backtrace_state_init) {
+        initialize_backtrace_inner();
+        backtrace_state_init = true;
+    }
+#endif
 }
 
 struct backtrace_cb_data {

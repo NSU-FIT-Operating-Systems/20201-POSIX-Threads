@@ -12,7 +12,9 @@ struct notify {
     handler_t handler;
     notify_cb_t on_notified;
 
+#ifndef COMMON_PTHREADS_DISABLED
     pthread_mutex_t mtx;
+#endif
     int wr_fd;
 
     bool raised;
@@ -20,7 +22,9 @@ struct notify {
 
 static void notify_free(notify_t *self) {
     error_t *err = NULL;
+#ifndef COMMON_PTHREADS_DISABLED
     pthread_mutex_destroy(&self->mtx);
+#endif
     err = error_from_posix(wrapper_close(self->wr_fd));
 
     if (err) {
@@ -37,7 +41,9 @@ static void notify_free(notify_t *self) {
 static error_t *notify_process(notify_t *self, loop_t *loop, poll_flags_t flags) {
     error_t *err = NULL;
 
+#ifndef COMMON_PTHREADS_DISABLED
     assert_mutex_lock(&self->mtx);
+#endif
     bool was_raised = self->raised;
 
     if (flags & LOOP_READ) {
@@ -54,7 +60,9 @@ static error_t *notify_process(notify_t *self, loop_t *loop, poll_flags_t flags)
     }
 
     self->raised = false;
+#ifndef COMMON_PTHREADS_DISABLED
     assert_mutex_unlock(&self->mtx);
+#endif
 
     if (err) goto read_fail;
 
@@ -94,6 +102,7 @@ error_t *notify_new(notify_t **result) {
         wrapper_fcntli(wr_fd, F_SETFL, O_NONBLOCK)));
     if (err) goto fcntli_fail;
 
+#ifndef COMMON_PTHREADS_DISABLED
     pthread_mutexattr_t mtx_attr;
     error_assert(error_wrap("Could not intiialize mutex attributes", error_from_errno(
         pthread_mutexattr_init(&mtx_attr))));
@@ -101,6 +110,7 @@ error_t *notify_new(notify_t **result) {
     error_assert(error_wrap("Could not initialize a mutex", error_from_errno(
         pthread_mutex_init(&self->mtx, &mtx_attr))));
     pthread_mutexattr_destroy(&mtx_attr);
+#endif
 
     handler_init(&self->handler, &notify_vtable, rd_fd);
     self->wr_fd = wr_fd;
@@ -120,7 +130,9 @@ calloc_fail:
 }
 
 bool notify_post(notify_t *self) {
+#ifndef COMMON_PTHREADS_DISABLED
     assert_mutex_lock(&self->mtx);
+#endif
     bool was_raised = self->raised;
 
     if (!was_raised) {
@@ -134,7 +146,9 @@ bool notify_post(notify_t *self) {
     }
 
     self->raised = true;
+#ifndef COMMON_PTHREADS_DISABLED
     assert_mutex_unlock(&self->mtx);
+#endif
 
     return !was_raised;
 }

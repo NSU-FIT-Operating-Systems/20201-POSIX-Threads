@@ -5,9 +5,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#ifndef COMMON_PTHREADS_DISABLED
 #include <pthread.h>
 
 pthread_mutex_t log_mtx = PTHREAD_MUTEX_INITIALIZER;
+#endif
 
 #define ESC "\x1b"
 #define CSI ESC "["

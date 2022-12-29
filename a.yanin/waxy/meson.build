@@ -1,5 +1,5 @@
 project('waxy', 'c',
-  default_options: ['warning_level=3', 'c_std=c2x', 'werror=true', 'default_library=static'])
+  default_options: ['warning_level=3', 'c_std=c2x', 'werror=true', 'default_library=static', 'pthreads=true'])
 
 common_modules = subproject('common', default_options: ['default_library=static']).get_variable('modules')
 
@@ -8,6 +8,8 @@ picohttpparser = declare_dependency(
   link_with: library('picohttpparser', 'external/picohttpparser/picohttpparser.c',
     include_directories: 'external/picohttpparser'),
 )
+
+pthreads_dep = dependency('threads', disabler: true, required: get_option('pthreads'))
 
 dependencies = [
   common_modules['collections.dlist'],
@@ -22,16 +24,25 @@ dependencies = [
   common_modules['posix'],
   common_modules['posix.adapter'],
   picohttpparser,
-  dependency('threads'),
 ]
+
+if pthreads_dep.found()
+  dependencies += [pthreads_dep]
+endif
 
 st_dependencies = dependencies + [
   common_modules['executor.single'],
 ]
 
 mt_dependencies = dependencies + [
-  common_modules['executor.thread-pool'],
+  pthreads_dep,
 ]
+
+if pthreads_dep.found()
+  mt_dependencies += [
+    common_modules['executor.thread-pool'],
+  ]
+endif
 
 common_sources = [
   'src/cache.c',
@@ -60,6 +71,10 @@ c_args = [
   '-D_POSIX_C_SOURCE=200809L',
   '-D_XOPEN_SOURCE=700',
 ]
+
+if not pthreads_dep.found()
+  c_args += ['-DWAXY_PTHREADS_DISABLED']
+endif
 
 waxy_common = library('waxy-common', common_sources,
   c_args: c_args,

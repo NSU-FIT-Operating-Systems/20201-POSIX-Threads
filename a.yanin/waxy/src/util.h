@@ -4,13 +4,16 @@
 #include <string.h>
 
 #include <arpa/inet.h>
+#ifndef WAXY_PTHREADS_DISABLED
 #include <pthread.h>
+#endif
 
 #include <common/error.h>
 #include <common/loop/io.h>
 
 #define TODO(MSG) (abort(), (void) MSG)
 
+#ifndef WAXY_PTHREADS_DISABLED
 [[maybe_unused]]
 static inline void assert_mutex_lock(pthread_mutex_t *mtx) {
     error_assert(error_wrap("Could not lock a mutex", error_from_errno(
@@ -22,6 +25,7 @@ static inline void assert_mutex_unlock(pthread_mutex_t *mtx) {
     error_assert(error_wrap("Could not unlock a mutex", error_from_errno(
         pthread_mutex_unlock(mtx))));
 }
+#endif
 
 [[maybe_unused]]
 static bool slice_cmp(slice_t lhs, slice_t rhs) {

@@ -3,7 +3,9 @@
 #include <stdatomic.h>
 #include <stdbool.h>
 
+#ifndef COMMON_PTHREADS_DISABLED
 #include <pthread.h>
+#endif
 
 #include <common/error.h>
 #include <common/executor/executor.h>
@@ -104,7 +106,9 @@ struct handler {
     atomic_bool force;
 
     // the following fields are protected by `mtx`
+#ifndef COMMON_PTHREADS_DISABLED
     pthread_mutex_t mtx;
+#endif
     poll_flags_t current_flags;
     poll_flags_t pending_flags;
 };

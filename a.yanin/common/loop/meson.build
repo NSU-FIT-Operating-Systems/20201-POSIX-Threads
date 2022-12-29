@@ -1,5 +1,5 @@
 loop_deps = [
-  dependency('threads'),
+  pthreads_dep,
   modules['collections.string'],
   modules['collections.vec'],
   modules['error'],
@@ -13,7 +13,7 @@ loop_deps = [
 
 modules += {
   'loop': declare_dependency(
-    include_directories: 'include',
+    include_directories: [include_directories('include'), conf_inc],
     link_with: library('common.loop', [
         'src/handler.c',
         'src/io.c',
@@ -23,7 +23,7 @@ modules += {
         'src/tcp.c',
       ],
       dependencies: loop_deps,
-      include_directories: 'include'),
+      include_directories: [include_directories('include'), conf_inc]),
     dependencies: loop_deps,
   ),
 }
