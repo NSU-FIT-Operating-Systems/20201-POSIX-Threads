@@ -58,3 +58,18 @@ posix_err_t wrapper_execvp(char const *file, char *const argv[]) {
 
     return make_posix_err("execvp(3) failed");
 }
+
+posix_err_t wrapper_sysconf(int name, long *result) {
+    assert(result != NULL);
+
+    errno = 0;
+    long retval = sysconf(name);
+
+    if (errno != 0) {
+        return make_posix_err("sysconf(3) failed");
+    }
+
+    *result = retval;
+
+    return make_posix_err_ok();
+}
