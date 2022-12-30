@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "common/error/macros.h"
+#include "common/error-codes/macros.h"
 
 #define MAX_INT64_CHAR_LEN 20
 

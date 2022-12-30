@@ -1,6 +1,6 @@
 modules += {
   'collections.dlist': declare_dependency(
-    include_directories: 'include',
-    dependencies: [modules['error'], modules['collections']],
+    include_directories: [include_directories('include'), conf_inc],
+    dependencies: [modules['error-codes'], modules['collections']],
   ),
 }

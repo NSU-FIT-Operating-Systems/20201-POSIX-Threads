@@ -1,11 +1,11 @@
 posix_deps = [
-  modules['error'],
+  modules['error-codes'],
   meson.get_compiler('c').find_library('rt', required: false),
 ]
 
 modules += {
   'posix': declare_dependency(
-    include_directories: 'include',
+    include_directories: [include_directories('include'), conf_inc],
     compile_args: '-D_POSIX_C_SOURCE=200809L',
     link_with: library('common.posix', [
         'src/aio.c',
@@ -21,7 +21,7 @@ modules += {
         'src/tty.c',
       ], c_args: '-D_POSIX_C_SOURCE=200809L',
       dependencies: posix_deps,
-      include_directories: 'include'),
+      include_directories: [include_directories('include'), conf_inc]),
     dependencies: posix_deps,
   ),
 }
