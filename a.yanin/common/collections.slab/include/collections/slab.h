@@ -37,7 +37,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 
-#include "common/error/error-codes.h"
+#include "common/error-codes/error-codes.h"
 
 typedef struct {
     SLAB_ELEMENT_TYPE value;

@@ -1,6 +1,6 @@
 modules += {
   'collections.slab': declare_dependency(
-    include_directories: 'include',
-    dependencies: [modules['error'], modules['collections.vec']],
+    include_directories: [include_directories('include'), conf_inc],
+    dependencies: [modules['error-codes'], modules['collections.vec']],
   ),
 }
