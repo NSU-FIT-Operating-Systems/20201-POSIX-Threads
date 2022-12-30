@@ -134,7 +134,12 @@ static handler_vtable_t const tcp_server_vtable = {
     .on_error = (handler_vtable_on_error_t) tcp_server_on_error,
 };
 
-error_t *tcp_server_new(struct sockaddr *addr, socklen_t addrlen, tcp_handler_server_t **result) {
+error_t *tcp_server_new(
+    struct sockaddr *addr,
+    socklen_t addrlen,
+    bool reuse_addr,
+    tcp_handler_server_t **result
+) {
     assert(addr->sa_family == AF_INET || addr->sa_family == AF_INET6);
 
     error_t *err = NULL;
@@ -146,6 +151,12 @@ error_t *tcp_server_new(struct sockaddr *addr, socklen_t addrlen, tcp_handler_se
     int fd = -1;
     err = error_from_posix(wrapper_socket(addr->sa_family, SOCK_STREAM, 0, &fd));
     if (err) goto socket_fail;
+
+    if (reuse_addr) {
+        err = error_wrap("Could not set SO_REUSEADDR", error_from_posix(
+            wrapper_setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &(int) { 1 }, sizeof(int))));
+        if (err) goto reuse_addr_fail;
+    }
 
     err = error_from_posix(wrapper_bind(fd, addr, addrlen));
     if (err) goto bind_fail;
@@ -166,6 +177,7 @@ error_t *tcp_server_new(struct sockaddr *addr, socklen_t addrlen, tcp_handler_se
 
 fcntl_fail:
 bind_fail:
+reuse_addr_fail:
     err = error_combine(err, error_from_posix(wrapper_close(fd)));
 
 socket_fail:
@@ -479,7 +491,12 @@ static error_t *tcp_client_handle_established(
         self->input_shut = true;
     }
 
-    if (self->on_read != NULL && flags & LOOP_READ) {
+    log_printf(LOG_DEBUG, "self->on_read != NULL = %d, flags & (LOOP_READ | LOOP_HUP) = %d",
+        self->on_read != NULL,
+        flags & (LOOP_READ | LOOP_HUP));
+
+    if (self->on_read != NULL && (flags & (LOOP_READ | LOOP_HUP))) {
+        log_printf(LOG_DEBUG, "calling on_read");
         err = tcp_client_handle_read(self, loop);
         if (err) return err;
     }
@@ -715,6 +732,7 @@ void tcp_shutdown_output(tcp_handler_t *self) {
         error_log_free(&err, LOG_WARN, ERROR_VERBOSITY_SOURCE_CHAIN | ERROR_VERBOSITY_BACKTRACE);
     }
 
+    log_printf(LOG_DEBUG, "output shut down");
     self->output_shut = true;
 }
 

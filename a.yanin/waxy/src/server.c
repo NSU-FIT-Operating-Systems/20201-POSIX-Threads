@@ -111,7 +111,7 @@ static error_t *server_new_tcp_serv(server_ctx_t *ctx, tcp_handler_server_t **re
     ctx->next_addr = addr->ai_next;
 
     tcp_handler_server_t *serv = NULL;
-    err = tcp_server_new(addr->ai_addr, addr->ai_addrlen, &serv);
+    err = tcp_server_new(addr->ai_addr, addr->ai_addrlen, true, &serv);
     if (err) goto serv_new_fail;
 
     tcp_server_set_on_error(serv, server_on_fail);

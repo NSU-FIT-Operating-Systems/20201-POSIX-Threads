@@ -35,6 +35,7 @@ typedef struct {
     struct phr_header *headers;
     tcp_handler_t *tcp;
     cache_rd_t *rd;
+    bool request_processed;
 } client_ctx_t;
 
 static void client_ctx_free(client_ctx_t *ctx) {
@@ -156,11 +157,9 @@ static error_t *client_cache_on_write(
     cache_buf_t *buf = (cache_buf_t *)((char *) slices - offsetof(cache_buf_t, slice));
 
     if (buf->eof) {
-        // the shutdown should not matter, I think, except for having the client notified of the EOF
-        // earlier, so it's not a bad thing either
         log_printf(LOG_DEBUG, "Closing the connection");
+        tcp_shutdown_input(handler);
         tcp_shutdown_output(handler);
-        handler_unregister((handler_t *) handler);
     }
 
     log_printf(LOG_DEBUG, "Freeing the buffer in on_write: %p", (void *) buf);
@@ -474,6 +473,18 @@ static error_t *client_handle_http_request(
     tcp_remote_info(handler, ip, &port);
     bool unregister = false;
 
+    if (ctx->request_processed) {
+        log_printf(LOG_DEBUG, "the request has been accepted; reading the rest");
+
+        if (eof) {
+            log_printf(LOG_DEBUG, "done doing that");
+            tcp_read(handler, NULL, NULL);
+            handler_unregister((handler_t *) handler);
+        }
+
+        return err;
+    }
+
     if (string_len(&ctx->buf) > MAX_REQUEST_SIZE) {
         log_printf(
             LOG_WARN,
@@ -529,9 +540,7 @@ static error_t *client_handle_http_request(
     }
 
     assert(count >= 0);
-    tcp_read(handler, NULL, NULL);
-    log_printf(LOG_DEBUG, "shut down input");
-    tcp_shutdown_input(handler);
+    ctx->request_processed = true;
     err = client_process_request(
         arc, loop, handler,
         method, path,
@@ -564,13 +573,15 @@ static error_t *client_on_read(loop_t *loop, tcp_handler_t *handler, slice_t sli
 
     arc_ctx_t *arc = handler_custom_data((handler_t *) handler);
     client_ctx_t *ctx = arc_ctx_get(arc);
-
     size_t prev_len = string_len(&ctx->buf);
 
-    err = error_wrap("Could not append read data to the buffer", error_from_common(
-        string_append_slice(&ctx->buf, slice.base, slice.len)));
-    if (err) goto append_fail;
+    if (!ctx->request_processed) {
+        err = error_wrap("Could not append read data to the buffer", error_from_common(
+            string_append_slice(&ctx->buf, slice.base, slice.len)));
+        if (err) goto append_fail;
+    }
 
+    log_printf(LOG_DEBUG, "a read event on a client socket!");
     err = client_handle_http_request(arc, loop, handler, prev_len, tcp_is_eof(handler));
     if (err) goto handle_fail;
 

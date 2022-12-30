@@ -89,7 +89,12 @@ typedef error_t *(*tcp_on_write_error_cb_t)(
 
 // Allocates a new `tcp_handler_server_t`, creates a socket for it to manage, and binds it to the
 // given address.
-error_t *tcp_server_new(struct sockaddr *addr, socklen_t addrlen, tcp_handler_server_t **result);
+error_t *tcp_server_new(
+    struct sockaddr *addr,
+    socklen_t addrlen,
+    bool reuse_addr,
+    tcp_handler_server_t **result
+);
 
 // Allocates a new `tcp_handler_t`, creates a socket for it to manage, and connects it to the
 // given address.
