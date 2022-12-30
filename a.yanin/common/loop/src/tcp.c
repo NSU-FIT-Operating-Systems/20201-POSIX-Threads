@@ -321,6 +321,7 @@ static error_t *tcp_client_handle_read(tcp_handler_t *self, loop_t *loop) {
     };
 
     if (self->input_shut && read_count == 0) {
+        log_printf(LOG_DEBUG, "self->eof = true!");
         self->eof = true;
     }
 
@@ -474,6 +475,7 @@ static error_t *tcp_client_handle_established(
     if (err) return err;
 
     if (flags & LOOP_HUP) {
+        log_printf(LOG_DEBUG, "got LOOP_HUP");
         self->input_shut = true;
     }
 
@@ -696,6 +698,8 @@ void tcp_shutdown_input(tcp_handler_t *self) {
     if (err) {
         error_log_free(&err, LOG_WARN, ERROR_VERBOSITY_SOURCE_CHAIN | ERROR_VERBOSITY_BACKTRACE);
     }
+
+    log_printf(LOG_DEBUG, "input shut down");
 
     self->input_shut = true;
 }

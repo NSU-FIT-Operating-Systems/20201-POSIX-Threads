@@ -3,6 +3,10 @@
 #include <assert.h>
 #include <stdlib.h>
 
+#ifndef WAXY_PTHREADS_DISABLED
+#include <pthread.h>
+#endif
+
 #include <picohttpparser/picohttpparser.h>
 
 #include <common/error-codes/adapter.h>
@@ -22,10 +26,10 @@ enum {
 
 // This struct is owned by the TCP handler (`tcp`).
 // A reference to it is kept as the custom data of `rd`.
-// While it's being referenced, no field is mutated, and concurrent reads are fine™.
-//
-// An invariant must be ensured: the TCP handler is alive and registered while so is `cache_rd_t`.
 typedef struct {
+#ifndef WAXY_PTHREADS_DISABLED
+    pthread_mutex_t mtx;
+#endif
     cache_t *cache;
     string_t buf;
     struct phr_header *headers;
@@ -33,8 +37,61 @@ typedef struct {
     cache_rd_t *rd;
 } client_ctx_t;
 
+static void client_ctx_free(client_ctx_t *ctx) {
+#ifndef WAXY_PTHREADS_DISABLED
+    pthread_mutex_destroy(&ctx->mtx);
+#endif
+
+    string_free(&ctx->buf);
+    free(ctx->headers);
+    free(ctx);
+}
+
+#define ARC_ELEMENT_TYPE client_ctx_t
+#define ARC_LABEL ctx
+#define ARC_FREE_CB client_ctx_free
+#define ARC_CONFIG (COLLECTION_DECLARE | COLLECTION_DEFINE | COLLECTION_STATIC)
+#include <common/memory/arc.h>
+
+static void client_on_free(handler_t *tcp_handler) {
+    arc_ctx_t *arc = handler_custom_data(tcp_handler);
+    client_ctx_t *ctx = arc_ctx_get(arc);
+#ifndef WAXY_PTHREADS_DISABLED
+    assert_mutex_lock(&ctx->mtx);
+#endif
+
+    ctx->tcp = NULL;
+
+    if (ctx->rd) {
+        handler_t *rd = (handler_t *) ctx->rd;
+        handler_unregister(rd);
+    }
+
+#ifndef WAXY_PTHREADS_DISABLED
+    assert_mutex_unlock(&ctx->mtx);
+#endif
+
+    arc_ctx_free(arc);
+}
+
+static void client_on_rd_free(handler_t *rd) {
+    arc_ctx_t *arc = handler_custom_data(rd);
+    client_ctx_t *ctx = arc_ctx_get(arc);
+#ifndef WAXY_PTHREADS_DISABLED
+    assert_mutex_lock(&ctx->mtx);
+#endif
+
+    ctx->rd = NULL;
+
+#ifndef WAXY_PTHREADS_DISABLED
+    assert_mutex_unlock(&ctx->mtx);
+#endif
+
+    arc_ctx_free(arc);
+}
+
 typedef struct {
-    client_ctx_t *ctx;
+    arc_ctx_t *ctx;
     loop_t *loop;
 } client_cache_ctx_t;
 
@@ -70,16 +127,6 @@ static slice_t const method_not_allowed_slice = {
     .base = method_not_allowed,
     .len = sizeof(method_not_allowed),
 };
-
-static void client_on_rd_free(handler_t *rd) {
-    client_ctx_t *ctx = handler_custom_data(rd);
-
-    if (ctx == NULL) {
-        return;
-    }
-
-    ctx->rd = NULL;
-}
 
 static error_t *client_on_req_err_write(
     loop_t *,
@@ -144,9 +191,17 @@ static error_t *client_cache_on_write_error(
 static error_t *client_cache_on_read(cache_rd_t *rd, loop_t *) {
     error_t *err = NULL;
 
-    client_ctx_t *ctx = handler_custom_data((handler_t *) rd);
+    arc_ctx_t *arc = handler_custom_data((handler_t *) rd);
+    client_ctx_t *ctx = arc_ctx_get(arc);
+#ifndef WAXY_PTHREADS_DISABLED
+    assert_mutex_lock(&ctx->mtx);
+#endif
 
-    if (ctx == NULL || ctx->rd == NULL) {
+    if (ctx->tcp == NULL) {
+#ifndef WAXY_PTHREADS_DISABLED
+        assert_mutex_unlock(&ctx->mtx);
+#endif
+
         // the TCP client has been unregistered
         handler_unregister((handler_t *) rd);
 
@@ -167,19 +222,15 @@ static error_t *client_cache_on_read(cache_rd_t *rd, loop_t *) {
     size_t count = cache_rd_read(rd, buf->buf, CACHE_BUFFER_SIZE, &buf->eof);
     buf->slice.len = count;
 
-    // we don't care about our poll flags, so unlocking is safe,
-    // and this ensures that the TCP handler's lock is always acquired before the rd's,
-    // avoiding deadlocks!
-    handler_unlock((handler_t *) rd);
     handler_lock((handler_t *) ctx->tcp);
-
     err = tcp_write(ctx->tcp, 1, &buf->slice,
         client_cache_on_write, client_cache_on_write_error);
-
     handler_unlock((handler_t *) ctx->tcp);
-    handler_lock((handler_t *) rd);
-
     if (err) goto write_fail;
+
+#ifndef WAXY_PTHREADS_DISABLED
+    assert_mutex_unlock(&ctx->mtx);
+#endif
 
     return err;
 
@@ -187,6 +238,10 @@ write_fail:
     free(buf);
 
 malloc_fail:
+#ifndef WAXY_PTHREADS_DISABLED
+    assert_mutex_unlock(&ctx->mtx);
+#endif
+
     // we're going to fail, so wrap up the party
     handler_unregister((handler_t *) ctx->tcp);
 
@@ -200,9 +255,16 @@ malloc_fail:
 static error_t *client_cache_on_update(cache_rd_t *rd, loop_t *, cache_entry_state_t state) {
     error_t *err = NULL;
 
-    client_ctx_t *ctx = handler_custom_data((handler_t *) rd);
+    arc_ctx_t *arc = handler_custom_data((handler_t *) rd);
+    client_ctx_t *ctx = arc_ctx_get(arc);
+#ifndef WAXY_PTHREADS_DISABLED
+    assert_mutex_lock(&ctx->mtx);
+#endif
 
-    if (ctx == NULL) {
+    if (ctx->tcp == NULL) {
+#ifndef WAXY_PTHREADS_DISABLED
+        assert_mutex_unlock(&ctx->mtx);
+#endif
         handler_unregister((handler_t *) rd);
 
         return err;
@@ -211,6 +273,10 @@ static error_t *client_cache_on_update(cache_rd_t *rd, loop_t *, cache_entry_sta
     char ip[INET6_ADDRSTRLEN] = {0};
     uint16_t port = 0;
     tcp_remote_info(ctx->tcp, ip, &port);
+
+#ifndef WAXY_PTHREADS_DISABLED
+    assert_mutex_unlock(&ctx->mtx);
+#endif
 
     switch (state) {
     case CACHE_ENTRY_INVALID:
@@ -228,6 +294,7 @@ static error_t *client_cache_on_update(cache_rd_t *rd, loop_t *, cache_entry_sta
         return err;
 
     case CACHE_ENTRY_COMPLETE:
+        log_printf(LOG_DEBUG, "Download complete for %s:%u", ip, port);
         // if we get this event, we'll (or, actually, we do already) have the read callback invoked
         // with eof set to true, so we don't need to do any special handling
         return err;
@@ -239,12 +306,14 @@ static error_t *client_cache_on_update(cache_rd_t *rd, loop_t *, cache_entry_sta
 static error_t *client_launch_cache_rd(client_cache_ctx_t *cache_ctx, cache_rd_t *rd) {
     error_t *err = NULL;
 
-    client_ctx_t *ctx = cache_ctx->ctx;
+    arc_ctx_t *arc = arc_ctx_share(cache_ctx->ctx);
+    client_ctx_t *ctx = arc_ctx_get(arc);
+
     loop_t *loop = cache_ctx->loop;
 
     ctx->rd = rd;
 
-    handler_set_custom_data((handler_t *) rd, ctx);
+    handler_set_custom_data((handler_t *) rd, arc);
     handler_set_on_free((handler_t *) rd, client_on_rd_free);
     cache_rd_set_on_read(rd, client_cache_on_read);
     cache_rd_set_on_update(rd, client_cache_on_update);
@@ -262,7 +331,7 @@ static error_t *client_on_cache_hit(void *data, cache_rd_t *rd) {
 
     char ip[INET6_ADDRSTRLEN] = {0};
     uint16_t port = 0;
-    tcp_remote_info(cache_ctx->ctx->tcp, ip, &port);
+    tcp_remote_info(arc_ctx_get(cache_ctx->ctx)->tcp, ip, &port);
     log_printf(LOG_DEBUG, "Fetched an entry from the cache for %s:%u", ip, port);
 
 fail:
@@ -283,7 +352,7 @@ static error_t *client_on_cache_miss(void *data, cache_rd_t *rd, cache_wr_t *wr)
 
     char ip[INET6_ADDRSTRLEN] = {0};
     uint16_t port = 0;
-    tcp_remote_info(cache_ctx->ctx->tcp, ip, &port);
+    tcp_remote_info(arc_ctx_get(cache_ctx->ctx)->tcp, ip, &port);
     log_printf(
         LOG_DEBUG,
         "The resource the client %s:%u has requested was not present in the cache",
@@ -304,7 +373,7 @@ upstream_init_fail:
 }
 
 static error_t *client_process_request(
-    client_ctx_t *ctx,
+    arc_ctx_t *arc,
     loop_t *loop,
     tcp_handler_t *handler,
     slice_t method,
@@ -374,10 +443,10 @@ static error_t *client_process_request(
     }
 
     client_cache_ctx_t cache_ctx = {
-        .ctx = ctx,
+        .ctx = arc,
         .loop = loop,
     };
-    err = cache_fetch(ctx->cache, &url, client_on_cache_hit, client_on_cache_miss, &cache_ctx);
+    err = cache_fetch(arc_ctx_get(arc)->cache, &url, client_on_cache_hit, client_on_cache_miss, &cache_ctx);
     if (err) goto fail;
 
     *unregister = false;
@@ -391,7 +460,7 @@ fail:
 }
 
 static error_t *client_handle_http_request(
-    client_ctx_t *ctx,
+    arc_ctx_t *arc,
     loop_t *loop,
     tcp_handler_t *handler,
     size_t prev_len,
@@ -399,6 +468,7 @@ static error_t *client_handle_http_request(
 ) {
     error_t *err = NULL;
 
+    client_ctx_t *ctx = arc_ctx_get(arc);
     char ip[INET6_ADDRSTRLEN] = {0};
     uint16_t port = 0;
     tcp_remote_info(handler, ip, &port);
@@ -460,9 +530,10 @@ static error_t *client_handle_http_request(
 
     assert(count >= 0);
     tcp_read(handler, NULL, NULL);
+    log_printf(LOG_DEBUG, "shut down input");
     tcp_shutdown_input(handler);
     err = client_process_request(
-        ctx, loop, handler,
+        arc, loop, handler,
         method, path,
         minor_version,
         &unregister
@@ -491,7 +562,8 @@ static error_t *client_on_error(loop_t *, tcp_handler_t *handler, error_t *err) 
 static error_t *client_on_read(loop_t *loop, tcp_handler_t *handler, slice_t slice) {
     error_t *err = NULL;
 
-    client_ctx_t *ctx = handler_custom_data((handler_t *) handler);
+    arc_ctx_t *arc = handler_custom_data((handler_t *) handler);
+    client_ctx_t *ctx = arc_ctx_get(arc);
 
     size_t prev_len = string_len(&ctx->buf);
 
@@ -499,7 +571,7 @@ static error_t *client_on_read(loop_t *loop, tcp_handler_t *handler, slice_t sli
         string_append_slice(&ctx->buf, slice.base, slice.len)));
     if (err) goto append_fail;
 
-    err = client_handle_http_request(ctx, loop, handler, prev_len, tcp_is_eof(handler));
+    err = client_handle_http_request(arc, loop, handler, prev_len, tcp_is_eof(handler));
     if (err) goto handle_fail;
 
 handle_fail:
@@ -524,12 +596,35 @@ error_t *client_init(tcp_handler_t *handler, cache_t *cache) {
 
     ctx->tcp = handler;
     ctx->rd = NULL;
-    handler_set_custom_data((handler_t *) handler, ctx);
-    handler_set_on_free((handler_t *) handler, (handler_on_free_cb_t) client_free_ctx);
+
+#ifndef WAXY_PTHREADS_DISABLED
+    pthread_mutexattr_t mtx_attr;
+    err = error_from_errno(pthread_mutexattr_init(&mtx_attr));
+    if (err) goto mtx_init_fail;
+
+    pthread_mutexattr_settype(&mtx_attr, PTHREAD_MUTEX_ERRORCHECK);
+    err = error_from_errno(pthread_mutex_init(&ctx->mtx, &mtx_attr));
+    pthread_mutexattr_destroy(&mtx_attr);
+    if (err) goto mtx_init_fail;
+#endif
+
+    arc_ctx_t *arc = arc_ctx_new(ctx);
+    err = OK_IF(arc != NULL);
+    if (err) goto arc_new_fail;
+
+    handler_set_custom_data((handler_t *) handler, arc);
+    handler_set_on_free((handler_t *) handler, (handler_on_free_cb_t) client_on_free);
     tcp_set_on_error(handler, client_on_error);
     tcp_read(handler, client_on_read, NULL);
 
     return err;
+
+arc_new_fail:
+#ifndef WAXY_PTHREADS_DISABLED
+    pthread_mutex_destroy(&ctx->mtx);
+
+mtx_init_fail:
+#endif
 
 string_new_fail:
     free(ctx->headers);
@@ -539,26 +634,4 @@ header_calloc_fail:
 
 ctx_calloc_fail:
     return err;
-}
-
-void client_free_ctx(tcp_handler_t *handler) {
-    client_ctx_t *ctx = handler_custom_data((handler_t *) handler);
-
-    if (ctx->rd) {
-        handler_t *rd = (handler_t *) ctx->rd;
-
-        handler_lock(rd);
-
-        handler_set_custom_data(rd, NULL);
-        handler_unregister(rd);
-
-        ctx->rd = NULL;
-
-        handler_unlock(rd);
-    }
-
-    string_free(&ctx->buf);
-    free(ctx->headers);
-    free(ctx);
-    handler_set_custom_data((handler_t *) handler, NULL);
 }

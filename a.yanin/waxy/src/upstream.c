@@ -34,7 +34,7 @@ typedef struct {
     }
 
 static slice_t const request_slices[] = {
-    SLICE_INIT_FROM_CSTR("GET /"),
+    SLICE_INIT_FROM_CSTR("GET "),
     SLICE_INIT_FROM_CSTR(" HTTP/1.1\r\n"
         "User-Agent: waxy/101\r\n"
         "Connection: close\r\n"
@@ -164,6 +164,7 @@ static error_t *upstream_on_read(loop_t *, tcp_handler_t *handler, slice_t slice
     if (err) goto unregister;
 
     if (tcp_is_eof(handler)) {
+        log_printf(LOG_DEBUG, "cache_wr_complete: eof");
         cache_wr_complete(ctx->wr);
 
         goto unregister;
