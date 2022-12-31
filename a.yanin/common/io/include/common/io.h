@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <stdint.h>
 
-#include "common/error/error-codes.h"
+#include "common/error-codes/error-codes.h"
 #include "common/collections/string.h"
 
 common_error_code_t read_byte(FILE *file, uint8_t *result);
