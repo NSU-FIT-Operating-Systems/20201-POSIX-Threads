@@ -192,3 +192,24 @@ posix_err_t wrapper_poll(struct pollfd *fds, nfds_t nfds, int timeout, int *resu
 
     return make_posix_err_ok();
 }
+
+posix_err_t wrapper_writev(int fd, struct iovec const *iov, int iovcnt, ssize_t *result) {
+    assert(result != NULL);
+    assert(fd >= 0);
+    assert(iovcnt >= 0);
+
+    ssize_t return_value = -1;
+
+    do {
+        errno = 0;
+        return_value = writev(fd, iov, iovcnt);
+    } while (return_value < 0 && errno == EINTR);
+
+    if (return_value < 0) {
+        return make_posix_err("writev(2) failed");
+    }
+
+    *result = return_value;
+
+    return make_posix_err_ok();
+}

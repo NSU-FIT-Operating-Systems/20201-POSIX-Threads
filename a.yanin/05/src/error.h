@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 
-#include <common/error/error-codes.h>
+#include <common/error-codes/error-codes.h>
 #include <common/posix/error.h>
 #include <common/log/log.h>
 
