@@ -4,7 +4,7 @@ project('intersem', 'c',
 common_modules = subproject('common', default_options: ['default_library=static']).get_variable('modules')
 
 dependencies = [
-  common_modules['error.display'],
+  common_modules['error-codes.display'],
   common_modules['log'],
   common_modules['posix'],
   dependency('threads'),

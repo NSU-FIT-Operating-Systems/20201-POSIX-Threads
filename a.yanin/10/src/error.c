@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <common/error/display.h>
+#include <common/error-codes/display.h>
 
 static err_t err_from_success(char const *file, int line) {
     return (err_t) {
