@@ -1,0 +1,3 @@
+[submodule "a.yanin/waxy/external/picohttpparser"]
+	path = a.yanin/waxy/external/picohttpparser
+	url = https://github.com/h2o/picohttpparser
