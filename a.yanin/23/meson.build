@@ -5,7 +5,7 @@ common_modules = subproject('common', default_options: ['default_library=static'
 
 dependencies = [
   common_modules['collections.dlist'],
-  common_modules['error.display'],
+  common_modules['error-codes.display'],
   common_modules['io'],
   common_modules['log'],
   common_modules['posix'],

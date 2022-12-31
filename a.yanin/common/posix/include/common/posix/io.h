@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <sys/select.h>
+#include <sys/uio.h>
 #include <unistd.h>
 
 #include "common/posix/error.h"
@@ -26,3 +27,4 @@ posix_err_t wrapper_select(
     int *result
 );
 posix_err_t wrapper_poll(struct pollfd *fds, nfds_t nfds, int timeout, int *result);
+posix_err_t wrapper_writev(int fd, struct iovec const *iov, int iovcnt, ssize_t *result);

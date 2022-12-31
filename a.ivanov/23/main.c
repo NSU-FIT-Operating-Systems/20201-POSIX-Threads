@@ -118,8 +118,8 @@ int main() {
     print_ts_list(stdout, lines_list, print_line);
     FREE_AND_EXIT:
     {
-	close(pipe_fds[1]);
-	close(pipe_fds[0]);
+	      close(pipe_fds[1]);
+	      close(pipe_fds[0]);
         free_ts_list(lines_list, free);
         free_list(tids_list, NULL);
         pthread_exit(NULL);

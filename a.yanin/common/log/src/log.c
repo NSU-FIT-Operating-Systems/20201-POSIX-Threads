@@ -1,7 +1,15 @@
 #include "common/log/log.h"
 
 #include <stdarg.h>
+#include <stdatomic.h>
 #include <stdio.h>
+#include <stdlib.h>
+
+#ifndef COMMON_PTHREADS_DISABLED
+#include <pthread.h>
+
+pthread_mutex_t log_mtx = PTHREAD_MUTEX_INITIALIZER;
+#endif
 
 #define ESC "\x1b"
 #define CSI ESC "["
@@ -12,38 +20,87 @@
 #define SGR_CYAN "36"
 #define SGR_BRIGHT_BLACK "90"
 
-static void log_print_prefix(log_level_t level) {
-    switch (level) {
+char const *const log_prefix_debug = CSI SGR_BOLD SGR CSI SGR_BRIGHT_BLACK SGR "DEBUG" CSI SGR;
+char const *const log_prefix_info = CSI SGR_BOLD SGR CSI SGR_CYAN SGR "INFO" CSI SGR;
+char const *const log_prefix_warn = CSI SGR_BOLD SGR CSI SGR_YELLOW SGR "WARN" CSI SGR;
+char const *const log_prefix_err = CSI SGR_BOLD SGR CSI SGR_RED SGR "ERR" CSI SGR;
+char const *const log_prefix_fatal = CSI SGR_BOLD SGR CSI SGR_RED SGR "FATAL" CSI SGR;
+
+char const *log_prefix_for_level(log_level_t log_level) {
+    char const *prefix = NULL;
+
+    switch (log_level) {
     case LOG_DEBUG:
-        fputs(CSI SGR_BOLD SGR CSI SGR_BRIGHT_BLACK SGR "DEBUG" CSI SGR ": ", stderr);
+        prefix = log_prefix_debug;
         break;
 
     case LOG_INFO:
-        fputs(CSI SGR_BOLD SGR CSI SGR_CYAN SGR "INFO" CSI SGR ": ", stderr);
+        prefix = log_prefix_info;
         break;
 
     case LOG_WARN:
-        fputs(CSI SGR_BOLD SGR CSI SGR_YELLOW SGR "WARN" CSI SGR ": ", stderr);
+        prefix = log_prefix_warn;
         break;
 
     case LOG_ERR:
-        fputs(CSI SGR_BOLD SGR CSI SGR_RED SGR "ERR" CSI SGR ": ", stderr);
+        prefix = log_prefix_err;
         break;
+
+    case LOG_FATAL:
+        prefix = log_prefix_fatal;
     }
+
+    return prefix;
+}
+
+static void log_print_prefix(log_level_t level) {
+    fprintf(stderr, "%s: ", log_prefix_for_level(level));
+}
+
+thread_local log_hook_t log_hook = log_print_prefix;
+
+static atomic_bool is_sync = false;
+
+bool log_is_sync(void) {
+    return is_sync;
+}
+
+void log_set_sync(void) {
+    is_sync = true;
+}
+
+static _Atomic(log_level_t) log_level = LOG_DEBUG;
+
+log_level_t log_get_level(void) {
+    return log_level;
+}
+
+void log_set_level(log_level_t level) {
+    log_level = level;
 }
 
 void log_vprintf_impl(log_level_t level, char const *fmt, va_list args) {
-    log_print_prefix(level);
+    log_hook(level);
     vfprintf(stderr, fmt, args);
     fputc('\n', stderr);
 }
 
 void log_write_impl(log_level_t level, char const *str) {
-    log_print_prefix(level);
+    log_hook(level);
     fputs(str, stderr);
 }
 
 void log_vwritef_impl(log_level_t level, char const *fmt, va_list args) {
-    log_print_prefix(level);
+    log_hook(level);
     vfprintf(stderr, fmt, args);
+}
+
+noreturn void log_abort(char const *fmt, ...) {
+    log_hook(LOG_FATAL);
+    va_list args;
+    va_start(args, fmt);
+    vfprintf(stderr, fmt, args);
+    fputc('\n', stderr);
+
+    abort();
 }

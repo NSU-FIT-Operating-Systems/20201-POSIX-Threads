@@ -35,7 +35,7 @@
 
 #include <stddef.h>
 
-#include "common/error/error-codes.h"
+#include "common/error-codes/error-codes.h"
 
 typedef struct DLIST_NAME(node) DLIST_NODE_TYPE;
 
@@ -105,6 +105,16 @@ DLIST_STATIC size_t DLIST_NAME(len)(DLIST_TYPE const *self);
 
 DLIST_STATIC void DLIST_NAME(concat)(DLIST_TYPE *self, DLIST_TYPE other);
 DLIST_STATIC void DLIST_NAME(swap)(DLIST_TYPE *self, DLIST_NODE_TYPE *lhs, DLIST_NODE_TYPE *rhs);
+DLIST_STATIC void DLIST_NAME(move_before)(
+    DLIST_TYPE *self,
+    DLIST_NODE_TYPE *node,
+    DLIST_NODE_TYPE *before
+);
+DLIST_STATIC void DLIST_NAME(move_after)(
+    DLIST_TYPE *self,
+    DLIST_NODE_TYPE *node,
+    DLIST_NODE_TYPE *before
+);
 
 #endif // #if (DLIST_CONFIG) & COLLECTION_DECLARE
 
@@ -113,7 +123,7 @@ DLIST_STATIC void DLIST_NAME(swap)(DLIST_TYPE *self, DLIST_NODE_TYPE *lhs, DLIST
 #include <assert.h>
 #include <stdlib.h>
 
-#include "common/error/macros.h"
+#include "common/error-codes/macros.h"
 
 DLIST_STATIC DLIST_TYPE DLIST_NAME(new)(void) {
     return (DLIST_TYPE) {
@@ -478,6 +488,107 @@ DLIST_STATIC void DLIST_NAME(swap)(DLIST_TYPE *self, DLIST_NODE_TYPE *lhs, DLIST
     } else if (self->end == rhs) {
         self->end = lhs;
     }
+}
+
+static bool DLIST_NAME(is_valid)(DLIST_TYPE const *self) {
+    size_t actual_len = 0;
+    DLIST_NODE_TYPE const *actual_end = NULL;
+
+    for (DLIST_NODE_TYPE const *node = self->head;
+            node != NULL;
+            node = node->next, ++actual_len) {
+        assert(node->next == NULL || node->next->prev == node);
+        assert(node->prev == NULL || node->prev->next == node);
+        actual_end = node;
+    }
+
+    assert(self->len == actual_len);
+    assert(self->end == actual_end);
+
+    return true;
+}
+
+DLIST_STATIC void DLIST_NAME(move_before)(
+    DLIST_TYPE *self,
+    DLIST_NODE_TYPE *node,
+    DLIST_NODE_TYPE *before
+) {
+    assert(self != NULL);
+    assert(node != NULL);
+    assert(DLIST_NAME(contains)(self, node));
+    assert(before == NULL || DLIST_NAME(contains)(self, before));
+    assert(DLIST_NAME(is_valid)(self));
+
+    if (before == node || before == DLIST_NAME(next)(node)) {
+        return;
+    }
+
+    if (before == NULL) {
+        DLIST_NAME(move_after)(self, node, DLIST_NAME(end_mut)(self));
+
+        return;
+    }
+
+    DLIST_NODE_TYPE *node_prev = DLIST_NAME(prev_mut)(node);
+    DLIST_NODE_TYPE *node_next = DLIST_NAME(next_mut)(node);
+    DLIST_NODE_TYPE *before_prev = DLIST_NAME(prev_mut)(before);
+
+    DLIST_NAME(unlink_both)(node);
+    DLIST_NAME(link)(before_prev, node);
+    DLIST_NAME(link)(node, before);
+
+    if (node == self->head) {
+        self->head = node_next;
+    } else if (before == self->head) {
+        self->head = node;
+    }
+
+    if (node == self->end) {
+        self->end = node_prev;
+    }
+
+    assert(DLIST_NAME(is_valid)(self));
+}
+
+DLIST_STATIC void DLIST_NAME(move_after)(
+    DLIST_TYPE *self,
+    DLIST_NODE_TYPE *node,
+    DLIST_NODE_TYPE *after
+) {
+    assert(self != NULL);
+    assert(node != NULL);
+    assert(DLIST_NAME(contains)(self, node));
+    assert(after == NULL || DLIST_NAME(contains)(self, after));
+    assert(DLIST_NAME(is_valid)(self));
+
+    if (after == node || after == DLIST_NAME(prev)(node)) {
+        return;
+    }
+
+    if (after == NULL) {
+        DLIST_NAME(move_after)(self, node, DLIST_NAME(head_mut)(self));
+
+        return;
+    }
+
+    DLIST_NODE_TYPE *node_prev = DLIST_NAME(prev_mut)(node);
+    DLIST_NODE_TYPE *node_next = DLIST_NAME(next_mut)(node);
+    DLIST_NODE_TYPE *after_next = DLIST_NAME(next_mut)(after);
+
+    DLIST_NAME(unlink_both)(node);
+    DLIST_NAME(link)(after, node);
+    DLIST_NAME(link)(node, after_next);
+
+    if (node == self->head) {
+        self->head = node_next;
+    }
+
+    if (node == self->end) {
+        self->end = node_prev;
+    } else if (after == self->end) {
+        self->end = node;
+    }
+    assert(DLIST_NAME(is_valid)(self));
 }
 
 #endif // #if (DLIST_CONFIG) & COLLECTION_DEFINE
